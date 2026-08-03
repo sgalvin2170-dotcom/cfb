@@ -17,13 +17,25 @@ import {
   type CfbdVenue,
 } from './sources/cfbd';
 
+// InstantDB caps the number of params per transaction; CFBD's /venues in
+// particular returns venues across every division (thousands of rows), so
+// bulk writes need chunking regardless of how small any one entity looks.
+const CHUNK_SIZE = 100;
+
+async function transactInChunks(txs: any[]) {
+  for (let i = 0; i < txs.length; i += CHUNK_SIZE) {
+    await db.transact(txs.slice(i, i + CHUNK_SIZE));
+  }
+}
+
 async function upsertTeams(teams: CfbdTeam[]) {
   const logosBySchool = await fetchEspnTeamLogos();
 
   const txs = teams.map((team) => {
     const logo = findBestMatch(team.school, logosBySchool);
+    // Note: don't repeat cfbdTeamId (the lookup attribute) inside .update() —
+    // InstantDB rejects re-setting the lookup attribute on first-time create.
     return db.tx.teams.lookup('cfbdTeamId', team.id).update({
-      cfbdTeamId: team.id,
       espnTeamId: logo?.espnId,
       school: team.school,
       mascot: team.mascot,
@@ -34,7 +46,7 @@ async function upsertTeams(teams: CfbdTeam[]) {
     });
   });
 
-  await db.transact(txs);
+  await transactInChunks(txs);
   return teams.length;
 }
 
@@ -43,7 +55,6 @@ async function upsertVenues(venues: CfbdVenue[]) {
     .filter((v) => v.id != null)
     .map((venue) =>
       db.tx.venues.lookup('cfbdVenueId', venue.id).update({
-        cfbdVenueId: venue.id,
         name: venue.name,
         city: venue.city,
         state: venue.state,
@@ -52,18 +63,35 @@ async function upsertVenues(venues: CfbdVenue[]) {
         grass: venue.grass ?? false,
         lat: venue.latitude,
         lng: venue.longitude,
-        elevation: venue.elevation,
+        elevation: venue.elevation != null ? Number(venue.elevation) : undefined,
       }),
     );
 
-  await db.transact(txs);
+  await transactInChunks(txs);
   return txs.length;
 }
 
-async function upsertGames(games: CfbdGame[]) {
-  const txs = games.flatMap((game) => {
+// Week 1 (and other early-season slates) routinely includes FBS-vs-FCS "buy
+// games." We only upsert FBS teams (/teams/fbs), so linking to an FCS
+// opponent's team id would fail — .link() via lookup requires the target to
+// already exist, unlike .update() via lookup, which creates on demand. Skip
+// those games for now rather than fetching the full FCS team list too; the
+// ensemble only needs FBS-vs-FBS matchups anyway.
+async function upsertGames(games: CfbdGame[], knownTeamIds: Set<number>) {
+  const [playable, skipped] = partition(
+    games,
+    (g) => knownTeamIds.has(g.homeId) && knownTeamIds.has(g.awayId),
+  );
+  if (skipped.length > 0) {
+    console.warn(
+      `[cfbd:games] skipping ${skipped.length} game(s) with a non-FBS opponent: ${skipped
+        .map((g) => `${g.awayTeam} @ ${g.homeTeam}`)
+        .join(', ')}`,
+    );
+  }
+
+  const txs = playable.flatMap((game) => {
     const gameTx = db.tx.games.lookup('cfbdGameId', game.id).update({
-      cfbdGameId: game.id,
       season: game.season,
       week: game.week,
       seasonType: game.seasonType,
@@ -80,8 +108,15 @@ async function upsertGames(games: CfbdGame[]) {
     return [gameTx, linkTx];
   });
 
-  await db.transact(txs);
-  return games.length;
+  await transactInChunks(txs);
+  return playable.length;
+}
+
+function partition<T>(items: T[], predicate: (item: T) => boolean): [T[], T[]] {
+  const pass: T[] = [];
+  const fail: T[] = [];
+  for (const item of items) (predicate(item) ? pass : fail).push(item);
+  return [pass, fail];
 }
 
 // v0: store the market line directly as a "pick" row with no model opinion
@@ -90,11 +125,15 @@ async function upsertGames(games: CfbdGame[]) {
 // verified against live data yet — treat marketHomeSpread as provisional
 // until the ensemble math (scripts/etl/ensemble.ts, not yet built) adds a
 // regression test against known historical games.
-async function upsertMarketOnlyPicks(gamesById: Map<number, CfbdGame>, lines: CfbdGameLines[]) {
+async function upsertMarketOnlyPicks(
+  gamesById: Map<number, CfbdGame>,
+  lines: CfbdGameLines[],
+  playableGameIds: Set<number>,
+) {
   const now = new Date().toISOString();
 
   const txs = lines
-    .filter((line) => gamesById.has(line.id) && line.lines.length > 0)
+    .filter((line) => gamesById.has(line.id) && playableGameIds.has(line.id) && line.lines.length > 0)
     .map((line) => {
       const preferred =
         line.lines.find((l) => l.provider?.toLowerCase() === 'consensus') ?? line.lines[0];
@@ -111,11 +150,11 @@ async function upsertMarketOnlyPicks(gamesById: Map<number, CfbdGame>, lines: Cf
         .link({ game: lookup('cfbdGameId', line.id) });
     });
 
-  await db.transact(txs);
+  await transactInChunks(txs);
   return txs.length;
 }
 
-async function recordRun(source: string, fn: () => Promise<number>) {
+async function recordRun(source: string, fn: () => Promise<number>): Promise<number> {
   const startedAt = new Date().toISOString();
   try {
     const rowsWritten = await fn();
@@ -129,6 +168,7 @@ async function recordRun(source: string, fn: () => Promise<number>) {
       }),
     ]);
     console.log(`[${source}] ok — ${rowsWritten} rows`);
+    return rowsWritten;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await db.transact([
@@ -146,15 +186,22 @@ async function recordRun(source: string, fn: () => Promise<number>) {
 }
 
 export async function runCfbdVerticalSlice(week?: number) {
-  await recordRun('cfbd:teams', () => fetchFbsTeams().then(upsertTeams));
+  const teams = await fetchFbsTeams();
+  const knownTeamIds = new Set(teams.map((t) => t.id));
+  await recordRun('cfbd:teams', () => upsertTeams(teams));
   await recordRun('cfbd:venues', () => fetchVenues().then(upsertVenues));
 
   const games = await fetchGames(week);
-  await recordRun('cfbd:games', async () => upsertGames(games));
+  const playableGameIds = new Set(
+    games.filter((g) => knownTeamIds.has(g.homeId) && knownTeamIds.has(g.awayId)).map((g) => g.id),
+  );
+  await recordRun('cfbd:games', () => upsertGames(games, knownTeamIds));
 
   const gamesById = new Map(games.map((g) => [g.id, g]));
   const lines = await fetchLines(week);
-  await recordRun('cfbd:lines', async () => upsertMarketOnlyPicks(gamesById, lines));
+  const picksWritten = await recordRun('cfbd:lines', () =>
+    upsertMarketOnlyPicks(gamesById, lines, playableGameIds),
+  );
 
-  return { teams: undefined, games: games.length, lines: lines.length };
+  return { teams: teams.length, games: playableGameIds.size, picks: picksWritten };
 }

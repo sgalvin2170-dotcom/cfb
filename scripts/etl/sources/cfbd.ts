@@ -42,7 +42,9 @@ export interface CfbdVenue {
   state?: string;
   latitude?: number;
   longitude?: number;
-  elevation?: number;
+  // CFBD's API actually returns this as a numeric string (e.g. "241.7"), not
+  // a number — found by hitting the real endpoint, not from the docs.
+  elevation?: string;
   capacity?: number;
   grass?: boolean;
   dome?: boolean;

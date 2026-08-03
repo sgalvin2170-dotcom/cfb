@@ -6,7 +6,12 @@
 // free-text team names against these canonical IDs).
 //
 // After editing this file, push it with: npx instant-cli@latest push schema
-import { i } from '@instantdb/react-native';
+//
+// Imports `i` from @instantdb/core (not @instantdb/react-native) because this
+// file is shared between the RN app and the Node-based ETL scripts — pulling
+// it in from the react-native package drags in react-native's own source,
+// which esbuild/tsx can't transform outside of Metro's Flow-aware pipeline.
+import { i } from '@instantdb/core';
 
 const _schema = i.schema({
   entities: {

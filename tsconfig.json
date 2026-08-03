@@ -2,5 +2,14 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true
-  }
+  },
+  "include": [
+    "app",
+    "components",
+    "lib",
+    "scripts",
+    "instant.schema.ts",
+    "instant.perms.ts",
+    "expo-env.d.ts"
+  ]
 }

@@ -1,6 +1,10 @@
-// Loads .env for local runs. In GitHub Actions, secrets are already present
-// as env vars, so this is a harmless no-op there (dotenv only fills gaps).
-import 'dotenv/config';
+// Loads .env for local runs, overriding any pre-existing shell/system env
+// vars of the same name (this machine has a stale global INSTANT_APP_ID from
+// an unrelated project, which would otherwise silently shadow ours). In
+// GitHub Actions there's no such shadowing risk since secrets are injected
+// fresh per-run, so `override: true` is a no-op there.
+import { config } from 'dotenv';
+config({ override: true });
 
 function required(name: string): string {
   const value = process.env[name];
