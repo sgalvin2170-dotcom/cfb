@@ -1,0 +1,45 @@
+name: Daily CFB data scrape
+
+on:
+  schedule:
+    # 09:00 UTC daily. Add a second, lighter-weight cron here later (per the
+    # plan doc) for a Saturday gameday odds/weather/injury-only refresh.
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+    inputs:
+      week:
+        description: 'CFB week to pull (blank = all weeks for the season)'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run daily ETL
+        env:
+          INSTANT_APP_ID: ${{ secrets.INSTANT_APP_ID }}
+          INSTANT_APP_ADMIN_TOKEN: ${{ secrets.INSTANT_APP_ADMIN_TOKEN }}
+          CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}
+          CFB_SEASON: ${{ vars.CFB_SEASON }}
+        run: npm run etl -- ${{ github.event.inputs.week }}
+
+      - name: Commit CSV export
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add exports/
+          git diff --cached --quiet || git commit -m "chore: daily CFB data export $(date -u +%F)"
+          git push
