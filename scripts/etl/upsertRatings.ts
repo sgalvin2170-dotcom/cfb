@@ -1,6 +1,9 @@
-// Rating-source ETL step: ESPN FPI + Sagarin -> InstantDB `ratings_raw`.
-// Both are free-text/id-keyed and need to be resolved to our canonical team
-// before writing; games/venues/teams from CFBD must already be upserted.
+// Rating-source ETL step: ESPN FPI + Sagarin + FEI + TeamRankings ->
+// InstantDB `ratings_raw`. All but FPI are free-text-team-named and need to
+// be resolved to our canonical team before writing; games/venues/teams from
+// CFBD must already be upserted. ThePredictionTracker is NOT here — it's
+// per-game rather than per-team, so it's matched directly in ensemble.ts
+// instead of stored in this team-centric table.
 import { lookup } from '@instantdb/admin';
 
 import { db, transactInChunks } from './instantAdmin';
@@ -9,6 +12,8 @@ import { findBestMatch, normalize } from './teamMatch';
 import { env } from './env';
 import { fetchEspnFpi } from './sources/espnFpi';
 import { fetchSagarinRatings } from './sources/sagarin';
+import { fetchFei } from './sources/fei';
+import { fetchTeamRankings } from './sources/teamRankings';
 
 interface KnownTeam {
   id: string;
@@ -24,6 +29,41 @@ async function fetchKnownTeams(): Promise<{ bySchool: Map<string, KnownTeam>; es
     if (t.espnTeamId) espnIds.add(t.espnTeamId);
   }
   return { bySchool, espnIds };
+}
+
+// Shared upsert path for every free-text-team-named, per-team source (all of
+// them except ESPN FPI, which is id-keyed, and ThePredictionTracker, which
+// is per-game — see the top-of-file comment).
+async function upsertTeamCentricSource(
+  source: string,
+  bySchool: Map<string, KnownTeam>,
+  rows: Array<{ team: string; metrics: Record<string, number> }>,
+  season: number,
+  asOfDate: string,
+): Promise<number> {
+  const scrapedAt = new Date().toISOString();
+  const day = scrapedAt.slice(0, 10);
+
+  let unmatched = 0;
+  const txs = rows.flatMap(({ team, metrics }) => {
+    const match = findBestMatch(team, bySchool);
+    if (!match) {
+      unmatched++;
+      return [];
+    }
+    return Object.entries(metrics).map(([metricName, value]) =>
+      db.tx.ratings_raw.lookup('ratingKey', `${source}:${match!.id}:${metricName}:${day}`)
+        .update({ source, season, asOfDate, metricName, value, scrapedAt })
+        .link({ team: match!.id }),
+    );
+  });
+
+  if (unmatched > 0) {
+    console.warn(`[${source}] could not match ${unmatched} team name(s) to a known FBS team`);
+  }
+
+  await transactInChunks(txs);
+  return txs.length;
 }
 
 async function upsertEspnFpi(espnIds: Set<string>) {
@@ -54,8 +94,6 @@ async function upsertEspnFpi(espnIds: Set<string>) {
 
 async function upsertSagarin(bySchool: Map<string, KnownTeam>) {
   const data = await fetchSagarinRatings();
-  const scrapedAt = new Date().toISOString();
-  const day = scrapedAt.slice(0, 10);
 
   if (data.season !== env.season) {
     console.warn(
@@ -63,37 +101,41 @@ async function upsertSagarin(bySchool: Map<string, KnownTeam>) {
     );
   }
 
-  let unmatched = 0;
-  const txs = data.teams.flatMap((row) => {
-    const match = findBestMatch(row.team, bySchool);
-    if (!match) {
-      unmatched++;
-      return [];
-    }
-    const metrics: Record<string, number> = {
-      sagarin_rating: row.rating,
-      sagarin_predictor: row.predictor,
-    };
-    return Object.entries(metrics).map(([metricName, value]) =>
-      db.tx.ratings_raw.lookup('ratingKey', `sagarin:${match!.id}:${metricName}:${day}`)
-        .update({
-          source: 'sagarin',
-          season: data.season,
-          asOfDate: data.asOfDate,
-          metricName,
-          value,
-          scrapedAt,
-        })
-        .link({ team: match!.id }),
-    );
-  });
+  return upsertTeamCentricSource(
+    'sagarin',
+    bySchool,
+    data.teams.map((row) => ({
+      team: row.team,
+      metrics: { sagarin_rating: row.rating, sagarin_predictor: row.predictor },
+    })),
+    data.season,
+    data.asOfDate,
+  );
+}
 
-  if (unmatched > 0) {
-    console.warn(`[sagarin] could not match ${unmatched} team name(s) to a known FBS team (expected for FCS opponents in Sagarin's 265-team list)`);
-  }
+async function upsertFei(bySchool: Map<string, KnownTeam>) {
+  const rows = await fetchFei();
+  return upsertTeamCentricSource(
+    'fei',
+    bySchool,
+    rows.map((row) => ({
+      team: row.team,
+      metrics: { fei: row.fei, ofei: row.ofei, dfei: row.dfei, sfei: row.sfei },
+    })),
+    env.season,
+    new Date().toISOString(), // BCFToys doesn't publish an as-of date on the page itself
+  );
+}
 
-  await transactInChunks(txs);
-  return txs.length;
+async function upsertTeamRankings(bySchool: Map<string, KnownTeam>) {
+  const rows = await fetchTeamRankings();
+  return upsertTeamCentricSource(
+    'team_rankings',
+    bySchool,
+    rows.map((row) => ({ team: row.team, metrics: { rating: row.rating } })),
+    env.season,
+    new Date().toISOString(), // page doesn't publish an explicit as-of date either
+  );
 }
 
 export async function runRatingsIngestion() {
@@ -101,4 +143,6 @@ export async function runRatingsIngestion() {
 
   await recordRun('espn:fpi', () => upsertEspnFpi(espnIds));
   await recordRun('sagarin:ratings', () => upsertSagarin(bySchool));
+  await recordRun('fei:ratings', () => upsertFei(bySchool));
+  await recordRun('team_rankings:ratings', () => upsertTeamRankings(bySchool));
 }
