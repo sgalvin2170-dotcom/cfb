@@ -103,3 +103,17 @@ export function fetchLines(week?: number): Promise<CfbdGameLines[]> {
     week,
   });
 }
+
+export interface CfbdTalent {
+  year: number;
+  team: string;
+  talent: number;
+}
+
+// Recruiting/roster talent composite — a display field only, per the plan
+// (data quality/timing is too uncertain to feed into the margin model).
+// Empty for the current season until CFBD publishes it (observed: 2026 was
+// empty while 2025 had 134 teams) — same resilience pattern as Sagarin.
+export function fetchTalent(): Promise<CfbdTalent[]> {
+  return cfbdGet<CfbdTalent[]>('/talent', { year: env.season });
+}

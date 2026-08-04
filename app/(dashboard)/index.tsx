@@ -23,6 +23,7 @@ export default function DashboardScreen() {
       awayTeam: {},
       venue: {},
       ensemblePicks: {},
+      weatherForecasts: {},
     },
   });
 
@@ -73,6 +74,14 @@ export default function DashboardScreen() {
             marketTotal: g.ensemblePicks[0].marketTotal,
             predictedTotal: g.ensemblePicks[0].predictedTotal,
             adjustmentNotes: g.ensemblePicks[0].adjustmentNotes,
+          }
+        : undefined,
+      weather: g.weatherForecasts?.[0]
+        ? {
+            tempF: g.weatherForecasts[0].tempF,
+            windMph: g.weatherForecasts[0].windMph,
+            windDir: g.weatherForecasts[0].windDir,
+            precipProb: g.weatherForecasts[0].precipProb,
           }
         : undefined,
     }));

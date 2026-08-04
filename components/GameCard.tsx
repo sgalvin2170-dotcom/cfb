@@ -13,7 +13,12 @@ export default function GameCard({ game }: { game: GameView }) {
       <Pressable style={styles.card}>
         <View style={styles.headerRow}>
           <Text style={styles.kickoff}>{formatKickoff(game.startDate)}</Text>
-          {game.venue?.dome ? <Text style={styles.domeTag}>DOME</Text> : null}
+          <View style={styles.tagRow}>
+            {game.venue?.dome ? <Text style={styles.domeTag}>DOME</Text> : null}
+            {!game.venue?.dome && game.weather?.windMph != null && game.weather.windMph >= 15 ? (
+              <Text style={styles.windTag}>💨 {Math.round(game.weather.windMph)} mph</Text>
+            ) : null}
+          </View>
         </View>
 
         <TeamBadge team={game.awayTeam} />
@@ -87,11 +92,23 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#57606a',
   },
+  tagRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
   domeTag: {
     fontSize: 10,
     fontWeight: '700',
     color: '#0969da',
     backgroundColor: '#ddf4ff',
+    paddingHorizontal: 6,
+    borderRadius: 4,
+  },
+  windTag: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#9a6700',
+    backgroundColor: '#fff8c5',
     paddingHorizontal: 6,
     borderRadius: 4,
   },

@@ -146,6 +146,7 @@ export async function runEnsemble(week?: number) {
       homeTeam: { ratings: {} },
       awayTeam: { ratings: {} },
       odds: {},
+      weatherForecasts: {},
     },
   });
 
@@ -252,6 +253,23 @@ export async function runEnsemble(week?: number) {
       totalConfidence = confidenceTier(Math.abs(edge), { high: 6, medium: 2 });
     }
 
+    // Wind is the primary weather lever for scoring suppression (per the
+    // plan) — downgrade the total's confidence rather than shift the point
+    // estimate itself, since the effect is real but too situational
+    // (dome/indoor teams unused to it, pass- vs run-heavy offenses, etc.) to
+    // model as a clean linear adjustment.
+    const weather = game.weatherForecasts?.[0];
+    let windNote: string | undefined;
+    if (totalConfidence && weather?.windMph != null) {
+      if (weather.windMph >= 20) {
+        totalConfidence = 'low';
+        windNote = `high wind (${weather.windMph}mph) forced total confidence to low`;
+      } else if (weather.windMph >= 15 && totalConfidence !== 'low') {
+        totalConfidence = totalConfidence === 'high' ? 'medium' : 'low';
+        windNote = `wind (${weather.windMph}mph) downgraded total confidence`;
+      }
+    }
+
     const predictedHomeWinProb = normalCdf(predictedMargin, MARGIN_TO_PROB_SIGMA);
 
     let mlPick: string | undefined;
@@ -285,7 +303,7 @@ export async function runEnsemble(week?: number) {
           mlEdge,
           adjustmentNotes: `blend of ${marginContributions.length} margin source(s): ${marginContributions
             .map((c) => c.source)
-            .join(', ')}${predictedTotal != null ? '; total from fei' : ''}`,
+            .join(', ')}${predictedTotal != null ? '; total from fei' : ''}${windNote ? `; ${windNote}` : ''}`,
           computedAt: now,
         })
         .link({ game: lookup('cfbdGameId', game.cfbdGameId) }),

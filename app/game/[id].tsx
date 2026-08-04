@@ -13,10 +13,11 @@ export default function GameDetailScreen() {
       ? {
           games: {
             $: { where: { id } },
-            homeTeam: { ratings: {} },
-            awayTeam: { ratings: {} },
+            homeTeam: { ratings: {}, talent: {} },
+            awayTeam: { ratings: {}, talent: {} },
             venue: {},
             ensemblePicks: {},
+            weatherForecasts: {},
           },
         }
       : null,
@@ -61,6 +62,21 @@ export default function GameDetailScreen() {
         </Text>
       ) : null}
 
+      {game.weatherForecasts?.[0] ? (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Weather at kickoff</Text>
+          <Row label="Temperature" value={fmtOrDash(game.weatherForecasts[0].tempF, (v) => `${Math.round(v)}°F`)} />
+          <Row
+            label="Wind"
+            value={fmtOrDash(
+              game.weatherForecasts[0].windMph,
+              (v) => `${Math.round(v)} mph${game.weatherForecasts[0].windDir ? ` ${game.weatherForecasts[0].windDir}` : ''}`,
+            )}
+          />
+          <Row label="Precipitation chance" value={fmtOrDash(game.weatherForecasts[0].precipProb, (v) => `${Math.round(v)}%`)} />
+        </View>
+      ) : null}
+
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Ensemble Picks</Text>
         {pick ? (
@@ -78,15 +94,25 @@ export default function GameDetailScreen() {
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Per-source ratings — {game.awayTeam?.school ?? 'Away'}</Text>
+        {game.awayTeam?.talent?.[0] ? (
+          <Row label="Talent composite" value={game.awayTeam.talent[0].talentScore?.toFixed(1)} />
+        ) : null}
         <RatingsList ratings={game.awayTeam?.ratings} />
       </View>
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Per-source ratings — {game.homeTeam?.school ?? 'Home'}</Text>
+        {game.homeTeam?.talent?.[0] ? (
+          <Row label="Talent composite" value={game.homeTeam.talent[0].talentScore?.toFixed(1)} />
+        ) : null}
         <RatingsList ratings={game.homeTeam?.ratings} />
       </View>
     </ScrollView>
   );
+}
+
+function fmtOrDash(value: number | undefined, fmt: (v: number) => string): string | undefined {
+  return value != null ? fmt(value) : undefined;
 }
 
 function RatingsList({ ratings }: { ratings?: any[] }) {

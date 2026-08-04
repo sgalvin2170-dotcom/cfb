@@ -10,6 +10,7 @@ import {
   fetchFbsTeams,
   fetchGames,
   fetchLines,
+  fetchTalent,
   fetchVenues,
   type CfbdGame,
   type CfbdGameLines,
@@ -109,6 +110,24 @@ function partition<T>(items: T[], predicate: (item: T) => boolean): [T[], T[]] {
   return [pass, fail];
 }
 
+// Display field only (per the plan) — not fed into the ensemble margin math.
+// Empty for the current season until CFBD publishes it; degrades to 0 rows
+// written rather than erroring, same as every other not-yet-available source.
+async function upsertTalent(knownSchools: Set<string>) {
+  const rows = await fetchTalent();
+  const txs = rows
+    .filter((row) => knownSchools.has(row.team))
+    .map((row) =>
+      db.tx.talent.lookup('talentKey', `${row.team}:${row.year}`).update({
+        season: row.year,
+        talentScore: row.talent,
+      }).link({ team: lookup('school', row.team) }),
+    );
+
+  await transactInChunks(txs);
+  return txs.length;
+}
+
 // CFBD's `spread` sign convention, confirmed against real fetched data (e.g.
 // USC -38.5 at home vs a heavy underdog, TCU -7 at home vs UNC): negative
 // means the HOME team is favored by that many points. ensemble.ts converts
@@ -191,5 +210,8 @@ export async function runCfbdVerticalSlice(week?: number) {
     upsertOdds(gamesById, lines, playableGameIds),
   );
 
-  return { teams: teams.length, games: playableGameIds.size, odds: oddsWritten };
+  const knownSchools = new Set(teams.map((t) => t.school));
+  const talentWritten = await recordRun('cfbd:talent', () => upsertTalent(knownSchools));
+
+  return { teams: teams.length, games: playableGameIds.size, odds: oddsWritten, talent: talentWritten };
 }

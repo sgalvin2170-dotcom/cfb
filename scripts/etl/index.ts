@@ -1,9 +1,10 @@
 // Daily ETL entrypoint. Run with: npm run etl -- [week]
-// Phase 3: CFBD (schedule/venues/odds) + ESPN FPI + Sagarin -> v1 equal-weight
-// ensemble -> ATS picks. Totals/ML and the remaining sources (FEI,
-// TeamRankings, ThePredictionTracker, weather, injuries) come in later phases.
+// CFBD (schedule/venues/odds/talent) + ESPN FPI + Sagarin + FEI +
+// TeamRankings + ThePredictionTracker + Open-Meteo weather -> v1
+// equal-weight ensemble -> ATS/O-U/ML picks. Injuries still pending.
 import { runCfbdVerticalSlice } from './upsertCore';
 import { runRatingsIngestion } from './upsertRatings';
+import { runWeatherIngestion } from './upsertWeather';
 import { runEnsembleWithLogging } from './ensemble';
 import { exportTodayCsv } from './csv';
 
@@ -17,6 +18,7 @@ async function main() {
   console.log('CFBD summary:', cfbdResult);
 
   await runRatingsIngestion();
+  await runWeatherIngestion(week);
 
   const picksComputed = await runEnsembleWithLogging(week);
   console.log('Ensemble picks computed:', picksComputed);

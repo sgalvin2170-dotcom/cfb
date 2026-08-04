@@ -18,7 +18,7 @@ const _schema = i.schema({
     teams: i.entity({
       cfbdTeamId: i.number().unique().indexed(),
       espnTeamId: i.string().unique().indexed().optional(),
-      school: i.string().indexed(),
+      school: i.string().unique().indexed(),
       mascot: i.string().optional(),
       abbreviation: i.string().optional(),
       conference: i.string().optional(),
@@ -86,6 +86,8 @@ const _schema = i.schema({
     }),
 
     talent: i.entity({
+      // "{teamId}:{season}" — idempotent upsert key.
+      talentKey: i.string().unique().indexed(),
       season: i.number().indexed(),
       talentScore: i.number(),
     }),
@@ -99,6 +101,9 @@ const _schema = i.schema({
     }),
 
     weather: i.entity({
+      // "{cfbdGameId}" — one row per game, overwritten as the forecast
+      // improves on closer-to-kickoff runs.
+      weatherKey: i.string().unique().indexed(),
       forecastAt: i.date(),
       tempF: i.number().optional(),
       windMph: i.number().optional(),

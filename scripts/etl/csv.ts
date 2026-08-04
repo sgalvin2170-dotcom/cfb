@@ -15,15 +15,17 @@ export async function exportTodayCsv(date: Date = new Date()) {
   const { games } = await db.query({
     games: {
       $: { where: { season: env.season }, order: { startDate: 'asc' } },
-      homeTeam: {},
-      awayTeam: {},
+      homeTeam: { talent: {} },
+      awayTeam: { talent: {} },
       venue: {},
       ensemblePicks: {},
+      weatherForecasts: {},
     },
   });
 
   const rows = (games ?? []).map((g: any) => {
     const pick = g.ensemblePicks?.[0];
+    const weather = g.weatherForecasts?.[0];
     return {
       kickoff_utc: g.startDate,
       week: g.week,
@@ -32,6 +34,12 @@ export async function exportTodayCsv(date: Date = new Date()) {
       venue: g.venue?.name ?? '',
       dome: g.venue?.dome ? 'yes' : 'no',
       capacity: g.venue?.capacity ?? '',
+      wind_mph: weather?.windMph ?? '',
+      wind_dir: weather?.windDir ?? '',
+      temp_f: weather?.tempF ?? '',
+      precip_pct: weather?.precipProb ?? '',
+      away_talent: g.awayTeam?.talent?.[0]?.talentScore ?? '',
+      home_talent: g.homeTeam?.talent?.[0]?.talentScore ?? '',
       market_spread_home: pick?.marketHomeSpread ?? '',
       market_total: pick?.marketTotal ?? '',
       model_margin_adjusted: pick?.adjustedPredictedMargin ?? '',
@@ -41,6 +49,7 @@ export async function exportTodayCsv(date: Date = new Date()) {
       total_pick: pick?.totalPick ?? '',
       total_confidence: pick?.totalConfidence ?? '',
       ml_pick: pick?.mlPick ?? '',
+      ml_edge: pick?.mlEdge ?? '',
       adjustment_notes: pick?.adjustmentNotes ?? '',
     };
   });
@@ -55,6 +64,12 @@ export async function exportTodayCsv(date: Date = new Date()) {
       'venue',
       'dome',
       'capacity',
+      'wind_mph',
+      'wind_dir',
+      'temp_f',
+      'precip_pct',
+      'away_talent',
+      'home_talent',
       'market_spread_home',
       'market_total',
       'model_margin_adjusted',
@@ -64,6 +79,7 @@ export async function exportTodayCsv(date: Date = new Date()) {
       'total_pick',
       'total_confidence',
       'ml_pick',
+      'ml_edge',
       'adjustment_notes',
     ],
   });

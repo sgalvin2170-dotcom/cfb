@@ -7,6 +7,14 @@ export interface TeamView {
   school: string;
   abbreviation?: string;
   logoUrl?: string;
+  talentScore?: number;
+}
+
+export interface WeatherView {
+  tempF?: number;
+  windMph?: number;
+  windDir?: string;
+  precipProb?: number;
 }
 
 export interface VenueView {
@@ -42,4 +50,5 @@ export interface GameView {
   awayTeam?: TeamView;
   venue?: VenueView;
   pick?: PickView;
+  weather?: WeatherView;
 }
