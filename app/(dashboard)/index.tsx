@@ -22,7 +22,7 @@ export default function DashboardScreen() {
       homeTeam: {},
       awayTeam: {},
       venue: {},
-      ensemblePicks: {},
+      ensemblePicks: { $: { order: { computedAt: 'desc' } } },
       weatherForecasts: {},
     },
   });

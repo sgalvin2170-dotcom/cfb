@@ -18,7 +18,7 @@ export async function exportTodayCsv(date: Date = new Date()) {
       homeTeam: { talent: {} },
       awayTeam: { talent: {} },
       venue: {},
-      ensemblePicks: {},
+      ensemblePicks: { $: { order: { computedAt: 'desc' } } },
       weatherForecasts: {},
     },
   });

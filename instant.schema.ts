@@ -136,6 +136,11 @@ const _schema = i.schema({
     }),
 
     model_weights: i.entity({
+      // "{modelVersion}:{sourceName}" — idempotent upsert key, so retraining
+      // overwrites instead of accumulating duplicate rows. sourceName
+      // "intercept" holds the fitted calibration constant (a plain number
+      // field, not a per-source weight — ensemble.ts special-cases it).
+      weightKey: i.string().unique().indexed(),
       modelVersion: i.string().indexed(),
       sourceName: i.string(),
       weight: i.number(),

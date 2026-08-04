@@ -34,8 +34,8 @@ export function parseFeiHtml(html: string): FeiTeamRow[] {
   return rows;
 }
 
-export async function fetchFei(): Promise<FeiTeamRow[]> {
-  const res = await fetch(URL_TEMPLATE(env.season), {
+export async function fetchFei(year: number = env.season): Promise<FeiTeamRow[]> {
+  const res = await fetch(URL_TEMPLATE(year), {
     headers: { 'User-Agent': 'Mozilla/5.0 (compatible; cfb-predictor personal-use ETL)' },
   });
   if (!res.ok) {

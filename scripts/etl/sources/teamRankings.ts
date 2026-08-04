@@ -29,8 +29,13 @@ export function parseTeamRankingsHtml(html: string): TeamRankingsRow[] {
   return rows;
 }
 
-export async function fetchTeamRankings(): Promise<TeamRankingsRow[]> {
-  const res = await fetch(URL, {
+// `date` (YYYY-MM-DD) pulls a historical snapshot instead of the current
+// ratings — confirmed live: ?date=2026-01-15 correctly returned mid-January
+// 2026 (end of the 2025 postseason) ratings, not today's. Used by the 2025
+// backfill/backtest to get an end-of-season snapshot.
+export async function fetchTeamRankings(date?: string): Promise<TeamRankingsRow[]> {
+  const url = date ? `${URL}?date=${date}` : URL;
+  const res = await fetch(url, {
     headers: {
       'User-Agent':
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',

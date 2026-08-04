@@ -63,6 +63,9 @@ export interface CfbdGame {
   homeTeam: string;
   awayId: number;
   awayTeam: string;
+  completed?: boolean;
+  homePoints?: number;
+  awayPoints?: number;
 }
 
 export interface CfbdLine {
@@ -80,25 +83,25 @@ export interface CfbdGameLines {
   lines: CfbdLine[];
 }
 
-export function fetchFbsTeams(): Promise<CfbdTeam[]> {
-  return cfbdGet<CfbdTeam[]>('/teams/fbs', { year: env.season });
+export function fetchFbsTeams(year: number = env.season): Promise<CfbdTeam[]> {
+  return cfbdGet<CfbdTeam[]>('/teams/fbs', { year });
 }
 
 export function fetchVenues(): Promise<CfbdVenue[]> {
   return cfbdGet<CfbdVenue[]>('/venues');
 }
 
-export function fetchGames(week?: number): Promise<CfbdGame[]> {
+export function fetchGames(week?: number, year: number = env.season): Promise<CfbdGame[]> {
   return cfbdGet<CfbdGame[]>('/games', {
-    year: env.season,
+    year,
     seasonType: 'regular',
     week,
   });
 }
 
-export function fetchLines(week?: number): Promise<CfbdGameLines[]> {
+export function fetchLines(week?: number, year: number = env.season): Promise<CfbdGameLines[]> {
   return cfbdGet<CfbdGameLines[]>('/lines', {
-    year: env.season,
+    year,
     seasonType: 'regular',
     week,
   });

@@ -28,8 +28,8 @@ const TEAM_ID_RE = /\/teams\/(\d+)\?/;
 // probabilities, playoff odds, etc.) that aren't relevant here.
 const WANTED_METRICS = new Set(['fpi', 'epaoffense', 'epadefense', 'epaspecialteams']);
 
-export async function fetchEspnFpi(): Promise<EspnFpiRow[]> {
-  const res = await fetch(URL_TEMPLATE(env.season), { headers: { Accept: 'application/json' } });
+export async function fetchEspnFpi(year: number = env.season): Promise<EspnFpiRow[]> {
+  const res = await fetch(URL_TEMPLATE(year), { headers: { Accept: 'application/json' } });
   if (!res.ok) {
     throw new Error(`ESPN FPI fetch failed: ${res.status} ${res.statusText}`);
   }

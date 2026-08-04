@@ -1,11 +1,15 @@
-// v1 ensemble: equal-weight blend of whichever core rating sources have data
-// for a given team/season, converted to a common "predicted home margin"
-// scale, compared against the market spread for an ATS pick. Totals come
-// from FEI's matchup formula (the only source that naturally produces one).
-// Moneyline picks compare our margin-implied win probability against the
-// devigged market probability. All still v1: equal weights and a fixed
-// margin-to-probability sigma, not yet fit from a backtest (see plan doc
-// phase 7).
+// Ensemble: blends whichever core rating sources have data for a given
+// game, converted to a common "predicted home margin" scale, compared
+// against the market spread for an ATS pick. Totals come from FEI's
+// matchup formula (the only source that naturally produces one). Moneyline
+// picks compare our margin-implied win probability against the devigged
+// market probability.
+//
+// Uses fitted weights from `model_weights` (modelVersion=v2-fitted) when
+// present — see scripts/train/backfill2025.ts — falling back to a plain
+// equal-weight average for any source that wasn't part of that backtest
+// (currently ThePredictionTracker, which has no scrapable historical
+// archive to backtest against) or if v2 hasn't been trained yet.
 import { lookup } from '@instantdb/admin';
 
 import { db, transactInChunks } from './instantAdmin';
@@ -14,22 +18,10 @@ import { env } from './env';
 import { findBestMatch, normalize } from './teamMatch';
 import { TEAM_RANKINGS_HFA } from './sources/teamRankings';
 import { fetchPredictionTracker, type PredictionTrackerGame } from './sources/predictionTracker';
+import { blendMargin, computeMarginContributions, type MarginContribution, type SagarinHfa } from './marginModel';
 
-const MODEL_VERSION = 'v1-equal-weight';
-
-// ESPN doesn't return its home-field-advantage constant from the API — this
-// is their own documented long-run average, not something we scraped live.
-// Reused as a stand-in HFA for FEI too, which doesn't publish its own.
-const ESPN_HFA = 2.15;
-
-// FEI publishes opponent-adjusted points-per-possession above average, not a
-// score prediction — turning that into a score needs a possessions/game and
-// a league-average-points assumption that the page itself doesn't provide.
-// Both are reasonable modern-FBS approximations, not scraped constants;
-// revisit if predicted totals look consistently off once real totals exist
-// to compare against (preseason has no actuals yet to check against).
-const FEI_POSSESSIONS_PER_TEAM = 12;
-const FEI_LEAGUE_AVG_POINTS = 28;
+const MODEL_VERSION = 'v1-equal-weight'; // overridden per-pick below if v2 weights are loaded
+const V2_MODEL_VERSION = 'v2-fitted';
 
 // NCAA FBS game-margin standard deviation is meaningfully wider than the
 // NFL's (more competitive imbalance); this is a documented ballpark, not a
@@ -104,7 +96,7 @@ async function fetchPredictionTrackerByGamePair(
   }
 }
 
-async function fetchSagarinHfa(): Promise<{ predictor: number; rating: number } | undefined> {
+async function fetchSagarinHfa(): Promise<SagarinHfa | undefined> {
   try {
     const { fetchSagarinRatings } = await import('./sources/sagarin');
     const data = await fetchSagarinRatings();
@@ -116,29 +108,31 @@ async function fetchSagarinHfa(): Promise<{ predictor: number; rating: number } 
   }
 }
 
+async function loadV2Weights(): Promise<{ weights: Map<string, number>; intercept: number } | undefined> {
+  const { model_weights } = await db.query({
+    model_weights: { $: { where: { modelVersion: V2_MODEL_VERSION } } },
+  });
+  if (!model_weights || model_weights.length === 0) return undefined;
+
+  const weights = new Map<string, number>();
+  let intercept = 0;
+  for (const w of model_weights as any[]) {
+    if (w.sourceName === 'intercept') intercept = w.weight;
+    else weights.set(w.sourceName, w.weight);
+  }
+  return { weights, intercept };
+}
+
 function confidenceTier(absEdge: number, thresholds: { high: number; medium: number }): string {
   if (absEdge >= thresholds.high) return 'high';
   if (absEdge >= thresholds.medium) return 'medium';
   return 'low';
 }
 
-// Most-recent value per metricName for one team's ratings_raw rows, since a
-// team can have several same-day scrapes during dev/testing and multiple
-// distinct metrics (fpi, epaoffense, ...) mixed together in one flat list.
-function latestMetrics(ratings: any[], source: string, season: number): Map<string, number> {
-  const bySource = ratings.filter((r) => r.source === source && r.season === season);
-  const latest = new Map<string, { value: number; scrapedAt: string }>();
-  for (const r of bySource) {
-    const existing = latest.get(r.metricName);
-    if (!existing || r.scrapedAt > existing.scrapedAt) {
-      latest.set(r.metricName, { value: r.value, scrapedAt: r.scrapedAt });
-    }
-  }
-  return new Map([...latest].map(([k, v]) => [k, v.value]));
-}
-
 export async function runEnsemble(week?: number) {
   const sagarinHfa = await fetchSagarinHfa();
+  const v2Weights = await loadV2Weights();
+  const modelVersion = v2Weights ? V2_MODEL_VERSION : MODEL_VERSION;
 
   const { games } = await db.query({
     games: {
@@ -162,75 +156,27 @@ export async function runEnsemble(week?: number) {
   let skippedNoSources = 0;
 
   const txs = (games as any[]).flatMap((game) => {
-    const marginContributions: Array<{ source: string; margin: number }> = [];
-    let predictedTotal: number | undefined;
-
-    const homeFpi = latestMetrics(game.homeTeam?.ratings ?? [], 'espn_fpi', env.season);
-    const awayFpi = latestMetrics(game.awayTeam?.ratings ?? [], 'espn_fpi', env.season);
-    if (homeFpi.has('fpi') && awayFpi.has('fpi')) {
-      marginContributions.push({
-        source: 'espn_fpi',
-        margin: homeFpi.get('fpi')! - awayFpi.get('fpi')! + ESPN_HFA,
-      });
-    }
-
-    if (sagarinHfa != null) {
-      const homeSagarin = latestMetrics(game.homeTeam?.ratings ?? [], 'sagarin', env.season);
-      const awaySagarin = latestMetrics(game.awayTeam?.ratings ?? [], 'sagarin', env.season);
-      if (homeSagarin.has('sagarin_predictor') && awaySagarin.has('sagarin_predictor')) {
-        marginContributions.push({
-          source: 'sagarin_predictor',
-          margin:
-            homeSagarin.get('sagarin_predictor')! - awaySagarin.get('sagarin_predictor')! + sagarinHfa.predictor,
-        });
-      }
-      if (homeSagarin.has('sagarin_rating') && awaySagarin.has('sagarin_rating')) {
-        marginContributions.push({
-          source: 'sagarin_rating',
-          margin: homeSagarin.get('sagarin_rating')! - awaySagarin.get('sagarin_rating')! + sagarinHfa.rating,
-        });
-      }
-    }
-
-    const homeFei = latestMetrics(game.homeTeam?.ratings ?? [], 'fei', env.season);
-    const awayFei = latestMetrics(game.awayTeam?.ratings ?? [], 'fei', env.season);
-    if (
-      homeFei.has('ofei') &&
-      homeFei.has('dfei') &&
-      awayFei.has('ofei') &&
-      awayFei.has('dfei')
-    ) {
-      const homeScore =
-        FEI_LEAGUE_AVG_POINTS + (homeFei.get('ofei')! - awayFei.get('dfei')!) * FEI_POSSESSIONS_PER_TEAM;
-      const awayScore =
-        FEI_LEAGUE_AVG_POINTS + (awayFei.get('ofei')! - homeFei.get('dfei')!) * FEI_POSSESSIONS_PER_TEAM;
-      marginContributions.push({ source: 'fei', margin: homeScore - awayScore + ESPN_HFA });
-      predictedTotal = homeScore + awayScore;
-    }
-
-    const homeTr = latestMetrics(game.homeTeam?.ratings ?? [], 'team_rankings', env.season);
-    const awayTr = latestMetrics(game.awayTeam?.ratings ?? [], 'team_rankings', env.season);
-    if (homeTr.has('rating') && awayTr.has('rating')) {
-      marginContributions.push({
-        source: 'team_rankings',
-        margin: homeTr.get('rating')! - awayTr.get('rating')! + TEAM_RANKINGS_HFA,
-      });
-    }
+    const { contributions, predictedTotal } = computeMarginContributions(
+      game.homeTeam?.ratings ?? [],
+      game.awayTeam?.ratings ?? [],
+      env.season,
+      sagarinHfa,
+      TEAM_RANKINGS_HFA,
+    );
 
     // Already a final predicted margin (aggregate of ~50 systems) — no HFA
     // to add, and no per-team lookup needed since it's matched by game pair.
     const predTracker = predTrackerByPair.get(`${game.homeTeam?.id}:${game.awayTeam?.id}`);
     if (predTracker?.predictionAvg != null) {
-      marginContributions.push({ source: 'predictiontracker', margin: predTracker.predictionAvg });
+      contributions.push({ source: 'predictiontracker', margin: predTracker.predictionAvg });
     }
 
-    if (marginContributions.length === 0) {
+    if (contributions.length === 0) {
       skippedNoSources++;
       return [];
     }
 
-    const predictedMargin =
-      marginContributions.reduce((sum, c) => sum + c.margin, 0) / marginContributions.length;
+    const predictedMargin = blendMargin(contributions, v2Weights?.weights, v2Weights?.intercept)!;
 
     const odds = game.odds?.[0];
     // Flip CFBD's convention (negative = home favored) to ours (positive =
@@ -285,9 +231,9 @@ export async function runEnsemble(week?: number) {
 
     computed++;
     return [
-      db.tx.ensemble_picks.lookup('pickKey', `${MODEL_VERSION}:${game.cfbdGameId}`)
+      db.tx.ensemble_picks.lookup('pickKey', `${modelVersion}:${game.cfbdGameId}`)
         .update({
-          modelVersion: MODEL_VERSION,
+          modelVersion,
           rawPredictedMargin: predictedMargin,
           adjustedPredictedMargin: predictedMargin,
           predictedTotal,
@@ -301,8 +247,8 @@ export async function runEnsemble(week?: number) {
           totalConfidence,
           mlPick,
           mlEdge,
-          adjustmentNotes: `blend of ${marginContributions.length} margin source(s): ${marginContributions
-            .map((c) => c.source)
+          adjustmentNotes: `blend of ${contributions.length} margin source(s) (${v2Weights ? 'fitted weights' : 'equal weight'}): ${contributions
+            .map((c: MarginContribution) => c.source)
             .join(', ')}${predictedTotal != null ? '; total from fei' : ''}${windNote ? `; ${windNote}` : ''}`,
           computedAt: now,
         })
@@ -312,11 +258,11 @@ export async function runEnsemble(week?: number) {
 
   await transactInChunks(txs);
   console.log(
-    `[ensemble] computed ${computed} pick(s), skipped ${skippedNoSources} game(s) with no available rating source`,
+    `[ensemble] (${modelVersion}) computed ${computed} pick(s), skipped ${skippedNoSources} game(s) with no available rating source`,
   );
   return computed;
 }
 
 export async function runEnsembleWithLogging(week?: number) {
-  return recordRun('ensemble:v1-equal-weight', () => runEnsemble(week));
+  return recordRun('ensemble', () => runEnsemble(week));
 }

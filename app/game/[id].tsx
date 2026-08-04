@@ -16,7 +16,7 @@ export default function GameDetailScreen() {
             homeTeam: { ratings: {}, talent: {} },
             awayTeam: { ratings: {}, talent: {} },
             venue: {},
-            ensemblePicks: {},
+            ensemblePicks: { $: { order: { computedAt: 'desc' } } },
             weatherForecasts: {},
           },
         }
