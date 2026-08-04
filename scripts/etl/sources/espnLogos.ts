@@ -12,6 +12,17 @@ interface EspnTeamsResponse {
         team: {
           id: string;
           displayName: string;
+          // School name without the mascot (e.g. "Alabama", not "Alabama
+          // Crimson Tide"). Matching on this instead of displayName is what
+          // makes the join reliable — ESPN has near-name-collisions like
+          // "Alabama" vs "Alabama A&M" vs "Alabama State", and matching on
+          // the full mascot-suffixed displayName made those genuinely
+          // ambiguous (a prefix/length heuristic once matched CFBD's
+          // "Alabama" to ESPN's "Alabama A&M Bulldogs" by coincidence of
+          // string length). `location` is an exact match for the vast
+          // majority of teams, so the fuzzy fallback in teamMatch.ts is only
+          // needed for genuine spelling divergences now.
+          location?: string;
           logos?: Array<{ href: string }>;
         };
       }>;
@@ -36,7 +47,7 @@ export async function fetchEspnTeamLogos(): Promise<Map<string, EspnTeamLogo>> {
   for (const league of json.sports?.[0]?.leagues ?? []) {
     for (const entry of league.teams) {
       const t = entry.team;
-      bySchool.set(normalize(t.displayName), {
+      bySchool.set(normalize(t.location ?? t.displayName), {
         espnId: t.id,
         displayName: t.displayName,
         logoUrl: t.logos?.[0]?.href,

@@ -1,17 +1,25 @@
 // Daily ETL entrypoint. Run with: npm run etl -- [week]
-// Vertical slice only for now (CFBD + ESPN logos) — see the plan doc's
-// phased build order for what sources get added next (ESPN FPI, Sagarin,
-// FEI, TeamRankings, ThePredictionTracker, weather, injuries, ensemble math).
+// Phase 3: CFBD (schedule/venues/odds) + ESPN FPI + Sagarin -> v1 equal-weight
+// ensemble -> ATS picks. Totals/ML and the remaining sources (FEI,
+// TeamRankings, ThePredictionTracker, weather, injuries) come in later phases.
 import { runCfbdVerticalSlice } from './upsertCore';
+import { runRatingsIngestion } from './upsertRatings';
+import { runEnsembleWithLogging } from './ensemble';
 import { exportTodayCsv } from './csv';
 
 async function main() {
   const weekArg = process.argv[2];
   const week = weekArg ? Number(weekArg) : undefined;
 
-  console.log(`Starting CFBD vertical-slice ETL run${week ? ` for week ${week}` : ' (all weeks)'}...`);
-  const result = await runCfbdVerticalSlice(week);
-  console.log('ETL summary:', result);
+  console.log(`Starting ETL run${week ? ` for week ${week}` : ' (all weeks)'}...`);
+
+  const cfbdResult = await runCfbdVerticalSlice(week);
+  console.log('CFBD summary:', cfbdResult);
+
+  await runRatingsIngestion();
+
+  const picksComputed = await runEnsembleWithLogging(week);
+  console.log('Ensemble picks computed:', picksComputed);
 
   await exportTodayCsv();
 }

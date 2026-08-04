@@ -3,7 +3,7 @@
 // build order in the plan doc for what comes next.
 import { id, lookup } from '@instantdb/admin';
 
-import { db } from './instantAdmin';
+import { db, transactInChunks } from './instantAdmin';
 import { findBestMatch } from './teamMatch';
 import { fetchEspnTeamLogos } from './sources/espnLogos';
 import {
@@ -16,17 +16,6 @@ import {
   type CfbdTeam,
   type CfbdVenue,
 } from './sources/cfbd';
-
-// InstantDB caps the number of params per transaction; CFBD's /venues in
-// particular returns venues across every division (thousands of rows), so
-// bulk writes need chunking regardless of how small any one entity looks.
-const CHUNK_SIZE = 100;
-
-async function transactInChunks(txs: any[]) {
-  for (let i = 0; i < txs.length; i += CHUNK_SIZE) {
-    await db.transact(txs.slice(i, i + CHUNK_SIZE));
-  }
-}
 
 async function upsertTeams(teams: CfbdTeam[]) {
   const logosBySchool = await fetchEspnTeamLogos();
@@ -42,7 +31,8 @@ async function upsertTeams(teams: CfbdTeam[]) {
       abbreviation: team.abbreviation,
       conference: team.conference,
       logoUrl: logo?.logoUrl ?? team.logos?.[0],
-      primaryColor: team.color ? `#${team.color}` : undefined,
+      // CFBD's color already includes the leading '#'.
+      primaryColor: team.color,
     });
   });
 
@@ -119,13 +109,12 @@ function partition<T>(items: T[], predicate: (item: T) => boolean): [T[], T[]] {
   return [pass, fail];
 }
 
-// v0: store the market line directly as a "pick" row with no model opinion
-// yet, so the dashboard has something real to show before the ensemble
-// (steps 3+ in the plan) exists. Sign convention for `spread` has NOT been
-// verified against live data yet — treat marketHomeSpread as provisional
-// until the ensemble math (scripts/etl/ensemble.ts, not yet built) adds a
-// regression test against known historical games.
-async function upsertMarketOnlyPicks(
+// CFBD's `spread` sign convention, confirmed against real fetched data (e.g.
+// USC -38.5 at home vs a heavy underdog, TCU -7 at home vs UNC): negative
+// means the HOME team is favored by that many points. ensemble.ts converts
+// this to "positive = home favored" to match its own predicted-margin sign
+// before comparing the two.
+async function upsertOdds(
   gamesById: Map<number, CfbdGame>,
   lines: CfbdGameLines[],
   playableGameIds: Set<number>,
@@ -138,23 +127,22 @@ async function upsertMarketOnlyPicks(
       const preferred =
         line.lines.find((l) => l.provider?.toLowerCase() === 'consensus') ?? line.lines[0];
 
-      return db.tx.ensemble_picks[id()]
-        .update({
-          modelVersion: 'v0-market-only',
-          rawPredictedMargin: 0,
-          adjustedPredictedMargin: 0,
-          marketHomeSpread: preferred.spread,
-          marketTotal: preferred.overUnder,
-          computedAt: now,
-        })
-        .link({ game: lookup('cfbdGameId', line.id) });
+      return db.tx.odds.lookup('oddsKey', `${line.id}:cfbd`).update({
+        source: 'cfbd',
+        sportsbook: preferred.provider,
+        homeSpread: preferred.spread,
+        overUnder: preferred.overUnder,
+        homeMoneyline: preferred.homeMoneyline,
+        awayMoneyline: preferred.awayMoneyline,
+        capturedAt: now,
+      }).link({ game: lookup('cfbdGameId', line.id) });
     });
 
   await transactInChunks(txs);
   return txs.length;
 }
 
-async function recordRun(source: string, fn: () => Promise<number>): Promise<number> {
+export async function recordRun(source: string, fn: () => Promise<number>): Promise<number> {
   const startedAt = new Date().toISOString();
   try {
     const rowsWritten = await fn();
@@ -199,9 +187,9 @@ export async function runCfbdVerticalSlice(week?: number) {
 
   const gamesById = new Map(games.map((g) => [g.id, g]));
   const lines = await fetchLines(week);
-  const picksWritten = await recordRun('cfbd:lines', () =>
-    upsertMarketOnlyPicks(gamesById, lines, playableGameIds),
+  const oddsWritten = await recordRun('cfbd:lines', () =>
+    upsertOdds(gamesById, lines, playableGameIds),
   );
 
-  return { teams: teams.length, games: playableGameIds.size, picks: picksWritten };
+  return { teams: teams.length, games: playableGameIds.size, odds: oddsWritten };
 }

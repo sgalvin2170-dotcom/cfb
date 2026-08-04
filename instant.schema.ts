@@ -17,7 +17,7 @@ const _schema = i.schema({
   entities: {
     teams: i.entity({
       cfbdTeamId: i.number().unique().indexed(),
-      espnTeamId: i.string().optional(),
+      espnTeamId: i.string().unique().indexed().optional(),
       school: i.string().indexed(),
       mascot: i.string().optional(),
       abbreviation: i.string().optional(),
@@ -60,6 +60,10 @@ const _schema = i.schema({
     // Tidy/long format so every rating source (including ESPN FPI's several
     // metrics per team) fits one shape: one row per (source, team, metric, date).
     ratings_raw: i.entity({
+      // "{source}:{teamId}:{metricName}:{scrape day}" — upserts idempotently
+      // so re-running the ETL the same day overwrites instead of piling up
+      // duplicates, while still keeping one row per distinct day over a season.
+      ratingKey: i.string().unique().indexed(),
       source: i.string().indexed(),
       season: i.number().indexed(),
       asOfDate: i.date().indexed(),
@@ -69,6 +73,9 @@ const _schema = i.schema({
     }),
 
     odds: i.entity({
+      // "{cfbdGameId}:{source}" — lets the ETL upsert idempotently instead
+      // of appending a fresh row on every run.
+      oddsKey: i.string().unique().indexed(),
       source: i.string().indexed(),
       sportsbook: i.string().optional(),
       homeSpread: i.number().optional(),
@@ -101,6 +108,10 @@ const _schema = i.schema({
     }),
 
     ensemble_picks: i.entity({
+      // "{modelVersion}:{cfbdGameId}" — lets the ETL upsert idempotently
+      // instead of appending a fresh row every run, while still letting
+      // multiple model versions coexist for later backtest comparison.
+      pickKey: i.string().unique().indexed(),
       modelVersion: i.string().indexed(),
       rawPredictedMargin: i.number(),
       adjustedPredictedMargin: i.number(),
@@ -116,7 +127,7 @@ const _schema = i.schema({
       mlPick: i.string().optional(),
       mlEdge: i.number().optional(),
       adjustmentNotes: i.string().optional(),
-      computedAt: i.date(),
+      computedAt: i.date().indexed(),
     }),
 
     model_weights: i.entity({
