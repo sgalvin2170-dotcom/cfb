@@ -13,7 +13,7 @@ export default function RootLayout() {
           headerTitleStyle: { fontWeight: '700' },
         }}
       >
-        <Stack.Screen name="(dashboard)/index" options={{ title: 'CFB Predictor' }} />
+        <Stack.Screen name="(dashboard)" options={{ headerShown: false }} />
         <Stack.Screen name="game/[id]" options={{ title: 'Game Detail' }} />
         <Stack.Screen name="settings" options={{ title: 'Settings' }} />
       </Stack>

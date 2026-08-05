@@ -5,93 +5,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import GameCard from '../../components/GameCard';
 import WeekSelector from '../../components/WeekSelector';
-import { db } from '../../lib/db';
-import type { GameView } from '../../lib/types';
-
-const CURRENT_SEASON = Number(process.env.EXPO_PUBLIC_CFB_SEASON ?? new Date().getFullYear());
+import { useSeasonGames } from '../../lib/useSeasonGames';
 
 export default function DashboardScreen() {
   const [selectedWeek, setSelectedWeek] = useState<number | undefined>(undefined);
-
-  const { isLoading, error, data } = db.useQuery({
-    games: {
-      $: {
-        where: { season: CURRENT_SEASON },
-        order: { startDate: 'asc' },
-      },
-      homeTeam: {},
-      awayTeam: {},
-      venue: {},
-      ensemblePicks: { $: { order: { computedAt: 'desc' } } },
-      weatherForecasts: {},
-    },
-  });
-
-  const games: GameView[] = useMemo(() => {
-    if (!data?.games) return [];
-    return data.games.map((g: any): GameView => ({
-      id: g.id,
-      season: g.season,
-      week: g.week,
-      startDate: g.startDate,
-      neutralSite: g.neutralSite,
-      tv: g.tv,
-      homeTeam: g.homeTeam
-        ? {
-            id: g.homeTeam.id,
-            school: g.homeTeam.school,
-            abbreviation: g.homeTeam.abbreviation,
-            logoUrl: g.homeTeam.logoUrl,
-          }
-        : undefined,
-      awayTeam: g.awayTeam
-        ? {
-            id: g.awayTeam.id,
-            school: g.awayTeam.school,
-            abbreviation: g.awayTeam.abbreviation,
-            logoUrl: g.awayTeam.logoUrl,
-          }
-        : undefined,
-      venue: g.venue
-        ? {
-            id: g.venue.id,
-            name: g.venue.name,
-            city: g.venue.city,
-            state: g.venue.state,
-            capacity: g.venue.capacity,
-            dome: g.venue.dome,
-          }
-        : undefined,
-      pick: g.ensemblePicks?.[0]
-        ? {
-            atsPick: g.ensemblePicks[0].atsPick,
-            atsConfidence: g.ensemblePicks[0].atsConfidence,
-            totalPick: g.ensemblePicks[0].totalPick,
-            totalConfidence: g.ensemblePicks[0].totalConfidence,
-            mlPick: g.ensemblePicks[0].mlPick,
-            mlEdge: g.ensemblePicks[0].mlEdge,
-            marketHomeSpread: g.ensemblePicks[0].marketHomeSpread,
-            marketTotal: g.ensemblePicks[0].marketTotal,
-            predictedTotal: g.ensemblePicks[0].predictedTotal,
-            adjustmentNotes: g.ensemblePicks[0].adjustmentNotes,
-          }
-        : undefined,
-      weather: g.weatherForecasts?.[0]
-        ? {
-            tempF: g.weatherForecasts[0].tempF,
-            windMph: g.weatherForecasts[0].windMph,
-            windDir: g.weatherForecasts[0].windDir,
-            precipProb: g.weatherForecasts[0].precipProb,
-          }
-        : undefined,
-    }));
-  }, [data]);
-
-  const weeks = useMemo(() => {
-    const set = new Set<number>();
-    games.forEach((g) => set.add(g.week));
-    return Array.from(set).sort((a, b) => a - b);
-  }, [games]);
+  const { isLoading, error, games, weeks } = useSeasonGames();
 
   const effectiveWeek = selectedWeek ?? weeks[0];
   const visibleGames = useMemo(
