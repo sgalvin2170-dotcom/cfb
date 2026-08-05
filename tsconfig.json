@@ -10,6 +10,7 @@
     "scripts",
     "instant.schema.ts",
     "instant.perms.ts",
-    "expo-env.d.ts"
+    "expo-env.d.ts",
+    ".expo/types/**/*.ts"
   ]
 }

@@ -149,6 +149,59 @@ const _schema = i.schema({
       backtestATSPct: i.number().optional(),
     }),
 
+    // One row per team per signing class (247Sports Composite, via CFBD's
+    // /recruiting/teams + /recruiting/players — CFBD's numbers matched
+    // 247Sports' own page exactly when checked, so no separate scrape needed).
+    recruiting_classes: i.entity({
+      // "{teamId}:{year}" — idempotent upsert key.
+      recruitKey: i.string().unique().indexed(),
+      season: i.number().indexed(),
+      rank: i.number().optional(),
+      points: i.number().optional(),
+      fiveStars: i.number(),
+      fourStars: i.number(),
+      threeStars: i.number(),
+      twoStars: i.number(),
+      commitCount: i.number(),
+    }),
+
+    // One row per transfer-portal entry (CFBD /player/portal). `portalRank`
+    // is this entry's leaguewide rank by CFBD's composite rating among all
+    // rated entries for the season (nulls unranked); topPortalPlayer flags
+    // the top 100 by that rank as a stand-in for "notable portal players"
+    // since no clean scrapable per-team top-100 list exists.
+    portal_transfers: i.entity({
+      // "{season}:{firstName}:{lastName}:{origin}:{destination}:{transferDate}"
+      transferKey: i.string().unique().indexed(),
+      season: i.number().indexed(),
+      firstName: i.string(),
+      lastName: i.string(),
+      position: i.string().optional(),
+      originName: i.string().optional(),
+      destinationName: i.string().optional(),
+      transferDate: i.date(),
+      rating: i.number().optional(),
+      stars: i.number().optional(),
+      eligibility: i.string().optional(),
+      portalRank: i.number().optional(),
+      topPortalPlayer: i.boolean(),
+    }),
+
+    // Roster continuity, derived by diffing this season's CFBD /roster
+    // against last season's by player id. Not literally "starters" — CFBD
+    // has no starter/snap-count designation — so this counts whole-roster
+    // continuity split by offense/defense position group; the UI labels it
+    // accordingly. Empty until CFBD publishes the current season's roster
+    // (same resilience pattern as talent/recruiting: preseason = no data yet).
+    roster_continuity: i.entity({
+      // "{teamId}:{year}" — idempotent upsert key.
+      continuityKey: i.string().unique().indexed(),
+      season: i.number().indexed(),
+      offenseReturning: i.number(),
+      defenseReturning: i.number(),
+      computedAt: i.date(),
+    }),
+
     scrape_runs: i.entity({
       source: i.string().indexed(),
       startedAt: i.date(),
@@ -199,6 +252,22 @@ const _schema = i.schema({
     pickGame: {
       forward: { on: 'ensemble_picks', has: 'one', label: 'game' },
       reverse: { on: 'games', has: 'many', label: 'ensemblePicks' },
+    },
+    recruitingClassTeam: {
+      forward: { on: 'recruiting_classes', has: 'one', label: 'team' },
+      reverse: { on: 'teams', has: 'many', label: 'recruitingClasses' },
+    },
+    portalOriginTeam: {
+      forward: { on: 'portal_transfers', has: 'one', label: 'originTeam' },
+      reverse: { on: 'teams', has: 'many', label: 'portalOut' },
+    },
+    portalDestinationTeam: {
+      forward: { on: 'portal_transfers', has: 'one', label: 'destinationTeam' },
+      reverse: { on: 'teams', has: 'many', label: 'portalIn' },
+    },
+    rosterContinuityTeam: {
+      forward: { on: 'roster_continuity', has: 'one', label: 'team' },
+      reverse: { on: 'teams', has: 'many', label: 'rosterContinuity' },
     },
   },
 });

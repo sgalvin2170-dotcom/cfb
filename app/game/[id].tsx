@@ -5,6 +5,8 @@ import TeamBadge from '../../components/TeamBadge';
 import { formatKickoff, formatSpread } from '../../lib/format';
 import { db } from '../../lib/db';
 
+const CURRENT_SEASON = Number(process.env.EXPO_PUBLIC_CFB_SEASON ?? new Date().getFullYear());
+
 export default function GameDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
 
@@ -13,8 +15,22 @@ export default function GameDetailScreen() {
       ? {
           games: {
             $: { where: { id } },
-            homeTeam: { ratings: {}, talent: {} },
-            awayTeam: { ratings: {}, talent: {} },
+            homeTeam: {
+              ratings: {},
+              talent: {},
+              recruitingClasses: { $: { where: { season: CURRENT_SEASON } } },
+              rosterContinuity: { $: { where: { season: CURRENT_SEASON } } },
+              portalIn: { $: { where: { season: CURRENT_SEASON } } },
+              portalOut: { $: { where: { season: CURRENT_SEASON } } },
+            },
+            awayTeam: {
+              ratings: {},
+              talent: {},
+              recruitingClasses: { $: { where: { season: CURRENT_SEASON } } },
+              rosterContinuity: { $: { where: { season: CURRENT_SEASON } } },
+              portalIn: { $: { where: { season: CURRENT_SEASON } } },
+              portalOut: { $: { where: { season: CURRENT_SEASON } } },
+            },
             venue: {},
             ensemblePicks: { $: { order: { computedAt: 'desc' } } },
             weatherForecasts: {},
@@ -78,6 +94,12 @@ export default function GameDetailScreen() {
       ) : null}
 
       <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Recruiting and Portal Transfers</Text>
+        <RecruitingPortalTeam label={game.awayTeam?.school ?? 'Away'} team={game.awayTeam} />
+        <RecruitingPortalTeam label={game.homeTeam?.school ?? 'Home'} team={game.homeTeam} />
+      </View>
+
+      <View style={styles.section}>
         <Text style={styles.sectionTitle}>Ensemble Picks</Text>
         {pick ? (
           <>
@@ -113,6 +135,61 @@ export default function GameDetailScreen() {
 
 function fmtOrDash(value: number | undefined, fmt: (v: number) => string): string | undefined {
   return value != null ? fmt(value) : undefined;
+}
+
+function positionBreakdown(entries: any[]): string {
+  if (entries.length === 0) return '—';
+  const counts = new Map<string, number>();
+  for (const e of entries) {
+    const pos = e.position ?? '?';
+    counts.set(pos, (counts.get(pos) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([pos, count]) => `${count} ${pos}`)
+    .join(', ');
+}
+
+function RecruitingPortalTeam({ label, team }: { label: string; team: any }) {
+  const recruiting = team?.recruitingClasses?.[0];
+  const continuity = team?.rosterContinuity?.[0];
+  const portalIn: any[] = team?.portalIn ?? [];
+  const portalOut: any[] = team?.portalOut ?? [];
+  const notable = [
+    ...portalIn.filter((p) => p.topPortalPlayer).map((p) => ({ ...p, direction: 'in' as const })),
+    ...portalOut.filter((p) => p.topPortalPlayer).map((p) => ({ ...p, direction: 'out' as const })),
+  ];
+
+  return (
+    <View style={styles.teamBlock}>
+      <Text style={styles.teamBlockTitle}>{label}</Text>
+      <Row
+        label="Recruiting class"
+        value={recruiting ? `#${recruiting.rank ?? '—'} nationally (${recruiting.points?.toFixed(1) ?? '—'} pts)` : 'Not yet ranked'}
+      />
+      {recruiting ? (
+        <Row label="5-star / 4-star signees" value={`${recruiting.fiveStars} / ${recruiting.fourStars}`} />
+      ) : null}
+      <Row
+        label="Returning players (off / def)"
+        value={continuity ? `${continuity.offenseReturning} / ${continuity.defenseReturning}` : 'Not yet published'}
+      />
+      <Row label="Portal — incoming" value={`${portalIn.length} (${positionBreakdown(portalIn)})`} />
+      <Row label="Portal — outgoing" value={`${portalOut.length} (${positionBreakdown(portalOut)})`} />
+      {notable.length > 0 ? (
+        <View style={styles.notableList}>
+          <Text style={styles.notableTitle}>Top-100 portal players</Text>
+          {notable.map((p) => (
+            <Text key={p.id} style={styles.notableItem}>
+              {p.direction === 'in' ? '↑' : '↓'} {p.firstName} {p.lastName} ({p.position ?? '?'})
+              {p.direction === 'in' ? ` from ${p.originName ?? 'the portal'}` : ` to ${p.destinationName ?? 'the portal'}`}
+              {p.portalRank ? ` — #${p.portalRank} in portal` : ''}
+            </Text>
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
 }
 
 function RatingsList({ ratings }: { ratings?: any[] }) {
@@ -202,5 +279,28 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#8b949e',
     fontStyle: 'italic',
+  },
+  teamBlock: {
+    marginTop: 6,
+  },
+  teamBlockTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#57606a',
+    marginBottom: 2,
+  },
+  notableList: {
+    marginTop: 6,
+    marginBottom: 4,
+    gap: 2,
+  },
+  notableTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0b1d3a',
+  },
+  notableItem: {
+    fontSize: 12,
+    color: '#57606a',
   },
 });

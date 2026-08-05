@@ -120,3 +120,63 @@ export interface CfbdTalent {
 export function fetchTalent(): Promise<CfbdTalent[]> {
   return cfbdGet<CfbdTalent[]>('/talent', { year: env.season });
 }
+
+export interface CfbdRecruitingTeam {
+  year: number;
+  team: string;
+  rank?: number;
+  points?: number;
+}
+
+// This is CFBD's ingest of the 247Sports Composite team rankings — checked
+// against the live 247Sports page directly (same rank/points per team), so
+// there's no need to scrape 247Sports ourselves.
+export function fetchRecruitingTeams(year: number = env.season): Promise<CfbdRecruitingTeam[]> {
+  return cfbdGet<CfbdRecruitingTeam[]>('/recruiting/teams', { year });
+}
+
+export interface CfbdRecruitingPlayer {
+  year: number;
+  committedTo?: string;
+  position?: string;
+  stars?: number;
+  rating?: number;
+}
+
+// No `team` param -> every FBS team's signees in one call (confirmed: one
+// request returns the full class, no need to loop per-team and burn through
+// the free-tier call budget).
+export function fetchRecruitingPlayers(year: number = env.season): Promise<CfbdRecruitingPlayer[]> {
+  return cfbdGet<CfbdRecruitingPlayer[]>('/recruiting/players', { year });
+}
+
+export interface CfbdPortalEntry {
+  season: number;
+  firstName: string;
+  lastName: string;
+  position?: string;
+  origin?: string;
+  destination?: string;
+  transferDate: string;
+  rating?: number;
+  stars?: number;
+  eligibility?: string;
+}
+
+export function fetchTransferPortal(year: number = env.season): Promise<CfbdPortalEntry[]> {
+  return cfbdGet<CfbdPortalEntry[]>('/player/portal', { year });
+}
+
+export interface CfbdRosterPlayer {
+  id: string;
+  team: string;
+  position?: string;
+}
+
+// No `team` param -> every FBS team's roster in one call, same as
+// /recruiting/players. Empty for the current season until CFBD publishes it
+// (roster pages typically land closer to fall camp) — same resilience
+// pattern as /talent.
+export function fetchRoster(year: number): Promise<CfbdRosterPlayer[]> {
+  return cfbdGet<CfbdRosterPlayer[]>('/roster', { year });
+}
