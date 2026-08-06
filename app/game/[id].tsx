@@ -75,6 +75,7 @@ export default function GameDetailScreen() {
           {game.venue.city ? ` · ${game.venue.city}, ${game.venue.state ?? ''}` : ''}
           {game.venue.capacity ? ` · Capacity ${game.venue.capacity.toLocaleString()}` : ''}
           {game.venue.dome ? ' · Dome' : ''}
+          {game.venue.grass === true ? ' · Grass' : game.venue.grass === false ? ' · Turf' : ''}
         </Text>
       ) : null}
 
@@ -181,7 +182,10 @@ function RecruitingPortalTeam({ label, team }: { label: string; team: any }) {
           <Text style={styles.notableTitle}>Top-100 portal players</Text>
           {notable.map((p) => (
             <Text key={p.id} style={styles.notableItem}>
-              {p.direction === 'in' ? '↑' : '↓'} {p.firstName} {p.lastName} ({p.position ?? '?'})
+              <Text style={p.direction === 'in' ? styles.arrowIn : styles.arrowOut}>
+                {p.direction === 'in' ? '↑' : '↓'}
+              </Text>
+              {' '}{p.firstName} {p.lastName} ({p.position ?? '?'})
               {p.direction === 'in' ? ` from ${p.originName ?? 'the portal'}` : ` to ${p.destinationName ?? 'the portal'}`}
               {p.portalRank ? ` — #${p.portalRank} in portal` : ''}
             </Text>
@@ -302,5 +306,13 @@ const styles = StyleSheet.create({
   notableItem: {
     fontSize: 12,
     color: '#57606a',
+  },
+  arrowIn: {
+    color: '#1a7f37',
+    fontWeight: '700',
+  },
+  arrowOut: {
+    color: '#cf222e',
+    fontWeight: '700',
   },
 });

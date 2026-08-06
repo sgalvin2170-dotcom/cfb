@@ -34,6 +34,15 @@ const MANUAL_ALIASES: Record<string, string> = {
   'louisiana monroe': 'ul monroe',
   hawaii: 'hawai i', // CFBD spells it "Hawai'i"; FEI spells it "Hawaii"
   'appalachian state': 'app state', // CFBD abbreviates to "App State"
+  fiu: 'florida international', // CBS Sports abbreviates to "FIU"
+  // CBS spells it "Miami-Ohio" -> normalizes to "miami ohio", which is a
+  // word-boundary prefix match for "Miami" (the Florida school) but NOT for
+  // our "Miami (OH)" candidate (normalizes to "miami oh", and "miami ohio"
+  // doesn't have a space after "oh") — found live: silently mismatched
+  // Miami (OH)'s CBS returning-starters row onto the wrong Miami before
+  // this alias was added. Same collision class as the historical
+  // Alabama/Michigan/Arizona/Texas/Utah/Miami ambiguous-prefix bugs.
+  'miami ohio': 'miami oh',
 
   // TeamRankings/ThePredictionTracker abbreviate heavily (space-separated on
   // TeamRankings, period-separated on ThePredictionTracker — normalize()

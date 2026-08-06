@@ -12,7 +12,7 @@
 // and correctly skips the non-FBS ones instead of guessing.
 import { db, transactInChunks } from './instantAdmin';
 import { recordRun } from './upsertCore';
-import { normalize } from './teamMatch';
+import { findBestMatch, normalize } from './teamMatch';
 import { env } from './env';
 import {
   fetchRecruitingPlayers,
@@ -22,6 +22,7 @@ import {
   type CfbdPortalEntry,
   type CfbdRosterPlayer,
 } from './sources/cfbd';
+import { fetchCbsReturning } from './sources/cbsReturning';
 
 interface KnownTeam {
   id: string;
@@ -205,10 +206,51 @@ async function upsertRosterContinuity(bySchool: Map<string, KnownTeam>) {
   return txs.length;
 }
 
+// CBS Sports publishes actual literal returning-starter counts (see
+// cbsReturning.ts) — unlike CFBD's roster diff above, which is a whole-
+// roster-continuity proxy. Writes to the same roster_continuity entity/key,
+// so this is called *after* upsertRosterContinuity in
+// runRecruitingPortalIngestion so its more precise starter-level counts win
+// for 2026. Matched by fuzzy findBestMatch (not CFBD's own exactMatch above)
+// since CBS is a genuine third-party source with its own naming, same as
+// the ratings sources in upsertRatings.ts.
+async function upsertCbsReturning(bySchool: Map<string, KnownTeam>) {
+  const rows = await fetchCbsReturning();
+  const now = new Date().toISOString();
+
+  let unmatched = 0;
+  const txs = rows.flatMap((row) => {
+    const match = findBestMatch(row.team, bySchool);
+    if (!match) {
+      unmatched++;
+      return [];
+    }
+    return [
+      db.tx.roster_continuity
+        .lookup('continuityKey', `${match.id}:${env.season}`)
+        .update({
+          season: env.season,
+          offenseReturning: row.offenseReturning,
+          defenseReturning: row.defenseReturning,
+          computedAt: now,
+        })
+        .link({ team: match.id }),
+    ];
+  });
+
+  if (unmatched > 0) {
+    console.warn(`[cbs-returning] could not match ${unmatched} team name(s) to a known FBS team`);
+  }
+
+  await transactInChunks(txs);
+  return txs.length;
+}
+
 export async function runRecruitingPortalIngestion() {
   const bySchool = await fetchKnownTeams();
 
   await recordRun('cfbd:recruiting', () => upsertRecruitingClasses(bySchool));
   await recordRun('cfbd:portal', () => upsertPortalTransfers(bySchool));
   await recordRun('cfbd:roster-continuity', () => upsertRosterContinuity(bySchool));
+  await recordRun('cbs:returning-starters', () => upsertCbsReturning(bySchool));
 }
