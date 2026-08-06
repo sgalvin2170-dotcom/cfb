@@ -22,6 +22,7 @@ export default function GameDetailScreen() {
               rosterContinuity: { $: { where: { season: CURRENT_SEASON } } },
               portalIn: { $: { where: { season: CURRENT_SEASON } } },
               portalOut: { $: { where: { season: CURRENT_SEASON } } },
+              pollRankings: { $: { where: { season: CURRENT_SEASON } } },
             },
             awayTeam: {
               ratings: {},
@@ -30,6 +31,7 @@ export default function GameDetailScreen() {
               rosterContinuity: { $: { where: { season: CURRENT_SEASON } } },
               portalIn: { $: { where: { season: CURRENT_SEASON } } },
               portalOut: { $: { where: { season: CURRENT_SEASON } } },
+              pollRankings: { $: { where: { season: CURRENT_SEASON } } },
             },
             venue: {},
             ensemblePicks: { $: { order: { computedAt: 'desc' } } },
@@ -58,15 +60,16 @@ export default function GameDetailScreen() {
   }
 
   const pick = game.ensemblePicks?.[0];
+  const rankFor = (team: any) => team?.pollRankings?.find((pr: any) => pr.week === game.week)?.rank;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.kickoff}>{formatKickoff(game.startDate)}</Text>
 
       <View style={styles.matchup}>
-        <TeamBadge team={game.awayTeam} />
+        <TeamBadge team={game.awayTeam} rank={rankFor(game.awayTeam)} />
         <Text style={styles.at}>at</Text>
-        <TeamBadge team={game.homeTeam} />
+        <TeamBadge team={game.homeTeam} rank={rankFor(game.homeTeam)} />
       </View>
 
       {game.venue ? (
@@ -196,13 +199,30 @@ function RecruitingPortalTeam({ label, team }: { label: string; team: any }) {
   );
 }
 
+// ratings_raw keeps one row per (source, metric) *per day* by design — see
+// instant.schema.ts — so a team re-scraped on multiple days accumulates
+// several rows with the same source+metric. That's intentional (useful for
+// future backtesting), but the game-detail view should only ever show the
+// latest one per source+metric, not every historical day's snapshot.
+function latestPerMetric(ratings: any[]): any[] {
+  const latest = new Map<string, any>();
+  for (const r of ratings) {
+    const key = `${r.source}:${r.metricName}`;
+    const existing = latest.get(key);
+    if (!existing || new Date(r.scrapedAt).getTime() > new Date(existing.scrapedAt).getTime()) {
+      latest.set(key, r);
+    }
+  }
+  return Array.from(latest.values());
+}
+
 function RatingsList({ ratings }: { ratings?: any[] }) {
   if (!ratings || ratings.length === 0) {
     return <Text style={styles.dim}>No ratings ingested yet for this team.</Text>;
   }
   return (
     <>
-      {ratings.map((r) => (
+      {latestPerMetric(ratings).map((r) => (
         <Row key={r.id} label={`${r.source} · ${r.metricName}`} value={r.value?.toFixed(2)} />
       ))}
     </>

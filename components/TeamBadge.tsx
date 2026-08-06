@@ -2,7 +2,7 @@ import { Image, StyleSheet, Text, View } from 'react-native';
 
 import type { TeamView } from '../lib/types';
 
-export default function TeamBadge({ team }: { team?: TeamView }) {
+export default function TeamBadge({ team, rank }: { team?: TeamView; rank?: number }) {
   return (
     <View style={styles.row}>
       {team?.logoUrl ? (
@@ -10,6 +10,7 @@ export default function TeamBadge({ team }: { team?: TeamView }) {
       ) : (
         <View style={styles.logoFallback} />
       )}
+      {rank != null ? <Text style={styles.rankBadge}>#{rank}</Text> : null}
       <Text style={styles.name} numberOfLines={1}>
         {team?.school ?? 'TBD'}
       </Text>
@@ -39,5 +40,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#0b1d3a',
     flexShrink: 1,
+  },
+  rankBadge: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#9a6700',
   },
 });

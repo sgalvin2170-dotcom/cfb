@@ -15,8 +15,8 @@ export function useSeasonGames() {
         where: { season: CURRENT_SEASON },
         order: { startDate: 'asc' },
       },
-      homeTeam: {},
-      awayTeam: {},
+      homeTeam: { pollRankings: { $: { where: { season: CURRENT_SEASON } } } },
+      awayTeam: { pollRankings: { $: { where: { season: CURRENT_SEASON } } } },
       venue: {},
       ensemblePicks: { $: { order: { computedAt: 'desc' } } },
       weatherForecasts: {},
@@ -27,6 +27,7 @@ export function useSeasonGames() {
     if (!data?.games) return [];
     return data.games.map((g: any): GameView => {
       const pick = g.ensemblePicks?.[0];
+      const pollRankFor = (team: any) => team?.pollRankings?.find((pr: any) => pr.week === g.week)?.rank;
       return {
         id: g.id,
         season: g.season,
@@ -40,6 +41,7 @@ export function useSeasonGames() {
               school: g.homeTeam.school,
               abbreviation: g.homeTeam.abbreviation,
               logoUrl: g.homeTeam.logoUrl,
+              pollRank: pollRankFor(g.homeTeam),
             }
           : undefined,
         awayTeam: g.awayTeam
@@ -48,6 +50,7 @@ export function useSeasonGames() {
               school: g.awayTeam.school,
               abbreviation: g.awayTeam.abbreviation,
               logoUrl: g.awayTeam.logoUrl,
+              pollRank: pollRankFor(g.awayTeam),
             }
           : undefined,
         venue: g.venue

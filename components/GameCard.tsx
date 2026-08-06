@@ -75,6 +75,7 @@ function TeamRow({ team, market, model }: { team?: TeamView; market?: number; mo
       ) : (
         <View style={styles.logoFallback} />
       )}
+      {team?.pollRank != null ? <Text style={styles.rankBadge}>#{team.pollRank}</Text> : null}
       <Text style={styles.teamName} numberOfLines={1}>
         {teamLabel(team)}
       </Text>
@@ -178,6 +179,11 @@ const styles = StyleSheet.create({
     color: '#0b1d3a',
     flexShrink: 1,
     flexGrow: 1,
+  },
+  rankBadge: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#9a6700',
   },
   numCols: {
     flexDirection: 'row',

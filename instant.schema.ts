@@ -149,6 +149,24 @@ const _schema = i.schema({
       backtestATSPct: i.number().optional(),
     }),
 
+    // Top-25 poll rank per team per CFBD week (ESPN's hidden rankings API,
+    // team matched by embedded ESPN team id — no fuzzy name matching
+    // needed). Keyed by week (not just season) since rank changes weekly;
+    // see scripts/etl/sources/espnRankings.ts for how a CFBD week resolves
+    // to the right underlying ESPN poll.
+    poll_rankings: i.entity({
+      // "{teamId}:{season}:{week}:{pollId}" — idempotent upsert key.
+      pollRankKey: i.string().unique().indexed(),
+      season: i.number().indexed(),
+      week: i.number().indexed(),
+      pollId: i.string().indexed(),
+      pollName: i.string(),
+      rank: i.number(),
+      previousRank: i.number().optional(),
+      points: i.number().optional(),
+      firstPlaceVotes: i.number().optional(),
+    }),
+
     // One row per team per signing class (247Sports Composite, via CFBD's
     // /recruiting/teams + /recruiting/players — CFBD's numbers matched
     // 247Sports' own page exactly when checked, so no separate scrape needed).
@@ -252,6 +270,10 @@ const _schema = i.schema({
     pickGame: {
       forward: { on: 'ensemble_picks', has: 'one', label: 'game' },
       reverse: { on: 'games', has: 'many', label: 'ensemblePicks' },
+    },
+    pollRankingTeam: {
+      forward: { on: 'poll_rankings', has: 'one', label: 'team' },
+      reverse: { on: 'teams', has: 'many', label: 'pollRankings' },
     },
     recruitingClassTeam: {
       forward: { on: 'recruiting_classes', has: 'one', label: 'team' },

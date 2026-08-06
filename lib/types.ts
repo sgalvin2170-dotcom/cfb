@@ -8,6 +8,7 @@ export interface TeamView {
   abbreviation?: string;
   logoUrl?: string;
   talentScore?: number;
+  pollRank?: number;
 }
 
 export interface RecruitingClassView {
