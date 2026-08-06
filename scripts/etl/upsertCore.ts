@@ -14,6 +14,7 @@ import {
   fetchVenues,
   type CfbdGame,
   type CfbdGameLines,
+  type CfbdLine,
   type CfbdTeam,
   type CfbdVenue,
 } from './sources/cfbd';
@@ -133,6 +134,22 @@ async function upsertTalent(knownSchools: Set<string>) {
 // means the HOME team is favored by that many points. ensemble.ts converts
 // this to "positive = home favored" to match its own predicted-margin sign
 // before comparing the two.
+// CFBD returns one lines[] entry per sportsbook per game, and this far out
+// from kickoff it's common for one book (e.g. DraftKings) to have only
+// posted a spread while another (e.g. Bovada) already has spread+total+ML
+// for the same game. Blindly taking lines[0] when there's no "consensus"
+// entry meant whichever book happened to sort first silently determined
+// whether a game got a total/moneyline at all — confirmed live: 53/53 games
+// had a spread but only 28/53 had a total and 26/53 had a moneyline, purely
+// because of array order, not actual data availability. Picking the most
+// complete single book's line instead (rather than merging fields across
+// books, which could mix inconsistent lines) fixes that.
+function mostCompleteLine(lines: CfbdLine[]): CfbdLine {
+  const completeness = (l: CfbdLine) =>
+    (l.spread != null ? 1 : 0) + (l.overUnder != null ? 1 : 0) + (l.homeMoneyline != null ? 1 : 0);
+  return lines.reduce((best, l) => (completeness(l) > completeness(best) ? l : best), lines[0]);
+}
+
 async function upsertOdds(
   gamesById: Map<number, CfbdGame>,
   lines: CfbdGameLines[],
@@ -144,7 +161,7 @@ async function upsertOdds(
     .filter((line) => gamesById.has(line.id) && playableGameIds.has(line.id) && line.lines.length > 0)
     .map((line) => {
       const preferred =
-        line.lines.find((l) => l.provider?.toLowerCase() === 'consensus') ?? line.lines[0];
+        line.lines.find((l) => l.provider?.toLowerCase() === 'consensus') ?? mostCompleteLine(line.lines);
 
       return db.tx.odds.lookup('oddsKey', `${line.id}:cfbd`).update({
         source: 'cfbd',

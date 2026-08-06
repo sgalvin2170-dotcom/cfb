@@ -11,7 +11,7 @@ export default function DashboardTabsLayout() {
         tabBarInactiveTintColor: '#8b949e',
       }}
     >
-      <Tabs.Screen name="index" options={{ title: 'Slate', tabBarLabel: 'Slate' }} />
+      <Tabs.Screen name="index" options={{ title: 'CFB Games', tabBarLabel: 'CFB Games' }} />
       <Tabs.Screen name="best-bets" options={{ title: 'Best Bets', tabBarLabel: 'Best Bets' }} />
     </Tabs>
   );

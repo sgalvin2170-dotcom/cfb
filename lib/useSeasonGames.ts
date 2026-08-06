@@ -1,4 +1,4 @@
-// Shared query used by both the Slate and Best Bets tabs so the two screens
+// Shared query used by both the CFB Games and Best Bets tabs so the two screens
 // can't drift out of sync on the ensemblePicks ordering fix (see
 // app/(dashboard)/index.tsx history — stale v1 picks bug).
 import { useMemo } from 'react';

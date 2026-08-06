@@ -9,6 +9,18 @@ export function formatKickoff(startDate: string | number): string {
   });
 }
 
+// Time-only, for use under a separate date-column header (see the Slate/CFB
+// Games grouped-by-date layout) where the date itself is already shown once.
+export function formatKickoffTime(startDate: string | number): string {
+  const d = new Date(startDate);
+  return d.toLocaleString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
+export function formatDateHeader(startDate: string | number): string {
+  const d = new Date(startDate);
+  return d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+}
+
 export function formatSpread(n: number | undefined): string {
   if (n === undefined || Number.isNaN(n)) return '—';
   const sign = n > 0 ? '+' : '';
