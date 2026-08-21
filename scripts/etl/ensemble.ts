@@ -134,11 +134,20 @@ export async function runEnsemble(week?: number) {
   const v2Weights = await loadV2Weights();
   const modelVersion = v2Weights ? V2_MODEL_VERSION : MODEL_VERSION;
 
+  // ratings_raw keeps one row per (source, team, metric, day) forever, so an
+  // unscoped `ratings: {}` join pulls a team's *entire* scrape history (tens
+  // of thousands of rows total) even though latestMetrics() below only ever
+  // wants the most recent day or two per metric — that unbounded fan-out
+  // (multiplied across every team in this week's games) is what was timing
+  // out InstantDB. Scoping to a short recent window keeps the join cheap
+  // while still tolerating a source that failed to scrape yesterday.
+  const ratingsCutoff = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+
   const { games } = await db.query({
     games: {
       $: { where: week != null ? { season: env.season, week } : { season: env.season } },
-      homeTeam: { ratings: {} },
-      awayTeam: { ratings: {} },
+      homeTeam: { ratings: { $: { where: { asOfDate: { $gte: ratingsCutoff } } } } },
+      awayTeam: { ratings: { $: { where: { asOfDate: { $gte: ratingsCutoff } } } } },
       odds: {},
       weatherForecasts: {},
     },
