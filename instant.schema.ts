@@ -220,6 +220,27 @@ const _schema = i.schema({
       computedAt: i.date(),
     }),
 
+    // Current head coach per team — a single upserted snapshot (like
+    // `weather`/`talent`), not an accumulating per-day log like
+    // `ratings_raw`: only "who's the coach right now and what's their
+    // record" matters here, so re-running the ETL overwrites the same row
+    // instead of piling up history.
+    coaches: i.entity({
+      // "{teamId}" — idempotent upsert key, one row per team.
+      coachKey: i.string().unique().indexed(),
+      firstName: i.string(),
+      lastName: i.string(),
+      hireDate: i.date().optional(),
+      yearsAtSchool: i.number(),
+      wins: i.number(),
+      losses: i.number(),
+      ties: i.number(),
+      careerWins: i.number(),
+      careerLosses: i.number(),
+      careerTies: i.number(),
+      computedAt: i.date().indexed(),
+    }),
+
     scrape_runs: i.entity({
       source: i.string().indexed(),
       startedAt: i.date(),
@@ -290,6 +311,10 @@ const _schema = i.schema({
     rosterContinuityTeam: {
       forward: { on: 'roster_continuity', has: 'one', label: 'team' },
       reverse: { on: 'teams', has: 'many', label: 'rosterContinuity' },
+    },
+    coachTeam: {
+      forward: { on: 'coaches', has: 'one', label: 'team' },
+      reverse: { on: 'teams', has: 'many', label: 'coaches' },
     },
   },
 });

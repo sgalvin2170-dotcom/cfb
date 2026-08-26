@@ -6,6 +6,7 @@ import { runCfbdVerticalSlice } from './upsertCore';
 import { runRatingsIngestion } from './upsertRatings';
 import { runWeatherIngestion } from './upsertWeather';
 import { runRecruitingPortalIngestion } from './upsertRecruitingPortal';
+import { runCoachesIngestion } from './upsertCoaches';
 import { runPollsIngestion } from './upsertPolls';
 import { runEnsembleWithLogging } from './ensemble';
 import { exportTodayCsv } from './csv';
@@ -22,6 +23,7 @@ async function main() {
   await runRatingsIngestion();
   await runWeatherIngestion(week);
   await runRecruitingPortalIngestion();
+  await runCoachesIngestion();
   await runPollsIngestion(week);
 
   const picksComputed = await runEnsembleWithLogging(week);

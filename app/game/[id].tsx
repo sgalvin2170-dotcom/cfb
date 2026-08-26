@@ -18,6 +18,7 @@ export default function GameDetailScreen() {
             homeTeam: {
               ratings: {},
               talent: {},
+              coaches: {},
               recruitingClasses: { $: { where: { season: CURRENT_SEASON } } },
               rosterContinuity: { $: { where: { season: CURRENT_SEASON } } },
               portalIn: { $: { where: { season: CURRENT_SEASON } } },
@@ -27,6 +28,7 @@ export default function GameDetailScreen() {
             awayTeam: {
               ratings: {},
               talent: {},
+              coaches: {},
               recruitingClasses: { $: { where: { season: CURRENT_SEASON } } },
               rosterContinuity: { $: { where: { season: CURRENT_SEASON } } },
               portalIn: { $: { where: { season: CURRENT_SEASON } } },
@@ -98,6 +100,12 @@ export default function GameDetailScreen() {
       ) : null}
 
       <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Coaching</Text>
+        <CoachingTeam label={game.awayTeam?.school ?? 'Away'} team={game.awayTeam} />
+        <CoachingTeam label={game.homeTeam?.school ?? 'Home'} team={game.homeTeam} />
+      </View>
+
+      <View style={styles.section}>
         <Text style={styles.sectionTitle}>Recruiting and Portal Transfers</Text>
         <RecruitingPortalTeam label={game.awayTeam?.school ?? 'Away'} team={game.awayTeam} />
         <RecruitingPortalTeam label={game.homeTeam?.school ?? 'Home'} team={game.homeTeam} />
@@ -152,6 +160,31 @@ function positionBreakdown(entries: any[]): string {
     .sort((a, b) => b[1] - a[1])
     .map(([pos, count]) => `${count} ${pos}`)
     .join(', ');
+}
+
+function formatRecord(wins?: number, losses?: number, ties?: number): string {
+  if (wins == null || losses == null) return '—';
+  return ties ? `${wins}-${losses}-${ties}` : `${wins}-${losses}`;
+}
+
+function CoachingTeam({ label, team }: { label: string; team: any }) {
+  const coach = team?.coaches?.[0];
+
+  return (
+    <View style={styles.teamBlock}>
+      <Text style={styles.teamBlockTitle}>{label}</Text>
+      {coach ? (
+        <>
+          <Row label="Head coach" value={`${coach.firstName} ${coach.lastName}`} />
+          <Row label="Years at school" value={`${coach.yearsAtSchool}`} />
+          <Row label="Record at school" value={formatRecord(coach.wins, coach.losses, coach.ties)} />
+          <Row label="Career record" value={formatRecord(coach.careerWins, coach.careerLosses, coach.careerTies)} />
+        </>
+      ) : (
+        <Text style={styles.dim}>No coaching data available yet.</Text>
+      )}
+    </View>
+  );
 }
 
 function RecruitingPortalTeam({ label, team }: { label: string; team: any }) {

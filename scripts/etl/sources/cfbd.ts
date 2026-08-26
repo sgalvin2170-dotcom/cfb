@@ -5,7 +5,18 @@ import { env } from '../env';
 
 const BASE_URL = 'https://api.collegefootballdata.com';
 
-async function cfbdGet<T>(path: string, params: Record<string, string | number | undefined> = {}): Promise<T> {
+const MAX_RATE_LIMIT_RETRIES = 4;
+
+// CFBD's 429s are an explicit short burst-rate limiter, not the monthly call
+// cap ("This is NOT related to your monthly API usage... wait a few seconds
+// and retry") — surfaced by callers that fire many requests back-to-back,
+// like fetchCoachCareer's one-call-per-coach loop. Retry with backoff rather
+// than surfacing every burst hiccup as a hard failure.
+async function cfbdGet<T>(
+  path: string,
+  params: Record<string, string | number | undefined> = {},
+  attempt = 0,
+): Promise<T> {
   const url = new URL(path, BASE_URL);
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined) url.searchParams.set(key, String(value));
@@ -17,6 +28,12 @@ async function cfbdGet<T>(path: string, params: Record<string, string | number |
       Accept: 'application/json',
     },
   });
+
+  if (res.status === 429 && attempt < MAX_RATE_LIMIT_RETRIES) {
+    const delayMs = 1000 * 2 ** attempt;
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    return cfbdGet<T>(path, params, attempt + 1);
+  }
 
   if (!res.ok) {
     throw new Error(`CFBD ${path} failed: ${res.status} ${res.statusText} — ${await res.text()}`);
@@ -179,4 +196,36 @@ export interface CfbdRosterPlayer {
 // pattern as /talent.
 export function fetchRoster(year: number): Promise<CfbdRosterPlayer[]> {
   return cfbdGet<CfbdRosterPlayer[]>('/roster', { year });
+}
+
+export interface CfbdCoachSeason {
+  school: string;
+  year: number;
+  games: number;
+  wins: number;
+  losses: number;
+  ties: number;
+}
+
+export interface CfbdCoach {
+  id: number;
+  firstName: string;
+  lastName: string;
+  hireDate?: string;
+  seasons: CfbdCoachSeason[];
+}
+
+// One call covers every FBS team's current head coach for the year — CFBD
+// scopes each coach's `seasons` to just the requested year here, not their
+// full history (that needs fetchCoachCareer below).
+export function fetchCoachesForSeason(year: number = env.season): Promise<CfbdCoach[]> {
+  return cfbdGet<CfbdCoach[]>('/coaches', { year });
+}
+
+// This endpoint has no `id` filter (confirmed against the live API — it's
+// silently ignored), so a coach's full multi-school career has to be looked
+// up by name; the caller then re-matches on `id` to guard against a
+// same-name collision returning the wrong person's history.
+export function fetchCoachCareer(firstName: string, lastName: string): Promise<CfbdCoach[]> {
+  return cfbdGet<CfbdCoach[]>('/coaches', { firstName, lastName });
 }

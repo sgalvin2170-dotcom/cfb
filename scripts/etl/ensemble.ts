@@ -141,7 +141,7 @@ export async function runEnsemble(week?: number) {
   // (multiplied across every team in this week's games) is what was timing
   // out InstantDB. Scoping to a short recent window keeps the join cheap
   // while still tolerating a source that failed to scrape yesterday.
-  const ratingsCutoff = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+  const ratingsCutoff = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
 
   const { games } = await db.query({
     games: {
