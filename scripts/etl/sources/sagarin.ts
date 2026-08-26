@@ -53,7 +53,13 @@ export interface SagarinData {
   teams: SagarinTeamRating[];
 }
 
-const HEADER_RE = /(?:FINAL\s+)?College Football (\d{4}) ratings through games of ([^\n<]+)/;
+// Two header shapes seen on the live page: mid-season ("College Football
+// 2026 ratings through games of <date>") and preseason, before any games
+// have been played ("2026 College Football STARTING ratings" — no games-of
+// date to extract, so `asOf` falls back to today's date like FEI does for
+// the same reason). Matches whichever the page currently shows.
+const HEADER_RE =
+  /(?:(?:FINAL\s+)?College Football (?<seasonMid>\d{4}) ratings through games of (?<asOfMid>[^\n<]+))|(?:(?<seasonStart>\d{4})\s+College Football STARTING ratings)/i;
 const HFA_RE =
   /HOME ADVANTAGE=\[\s*([\d.]+)\]\s*\[\s*([\d.]+)\]\s*\[\s*([\d.]+)\]\s*\[\s*([\d.]+)\]\s*\[\s*([\d.]+)\]/;
 const ROW_RE =
@@ -98,9 +104,11 @@ export function parseSagarinHtml(html: string): SagarinData {
     });
   }
 
-  const asOf = headerMatch[2].trim();
+  const groups = headerMatch.groups ?? {};
+  const season = groups.seasonMid ?? groups.seasonStart;
+  const asOf = groups.asOfMid?.trim() ?? 'preseason starting ratings (no games played yet)';
   return {
-    season: Number(headerMatch[1]),
+    season: Number(season),
     asOf,
     asOfDate: parseAsOfDate(asOf),
     homeAdvantage: {
