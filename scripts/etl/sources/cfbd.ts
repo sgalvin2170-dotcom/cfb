@@ -88,7 +88,9 @@ export interface CfbdGame {
 export interface CfbdLine {
   provider: string;
   spread?: number;
+  spreadOpen?: number;
   overUnder?: number;
+  overUnderOpen?: number;
   homeMoneyline?: number;
   awayMoneyline?: number;
 }

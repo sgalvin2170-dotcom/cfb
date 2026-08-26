@@ -27,6 +27,12 @@ export function formatSpread(n: number | undefined): string {
   return `${sign}${n.toFixed(1)}`;
 }
 
+// Totals (O/U) aren't a "favored by" number like a spread, so no +/- sign.
+export function formatTotal(n: number | undefined): string {
+  if (n === undefined || Number.isNaN(n)) return '—';
+  return n.toFixed(1);
+}
+
 export function confidenceColor(confidence: string | undefined): string {
   switch (confidence) {
     case 'high':

@@ -1,7 +1,7 @@
 import { Link } from 'expo-router';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { confidenceColor, formatKickoffTime, formatSpread } from '../lib/format';
+import { confidenceColor, formatKickoffTime, formatSpread, formatTotal } from '../lib/format';
 import type { GameView, TeamView } from '../lib/types';
 
 // ML has no stored confidence tier (unlike ATS/Total) — mirrors the
@@ -51,6 +51,7 @@ export default function GameCard({ game }: { game: GameView }) {
 
         <TeamRow team={game.awayTeam} market={awayMarket} model={awayModel} />
         <TeamRow team={game.homeTeam} market={homeMarket} model={homeModel} />
+        <TotalRow market={pick?.marketTotal} model={pick?.predictedTotal} />
 
         {pick ? (
           <View style={styles.picksRow}>
@@ -85,6 +86,22 @@ function TeamRow({ team, market, model }: { team?: TeamView; market?: number; mo
           <Text style={[styles.numText, styles.numTextModel]}>{formatSpread(model)}</Text>
         </View>
       ) : null}
+    </View>
+  );
+}
+
+function TotalRow({ market, model }: { market?: number; model?: number }) {
+  if (market == null && model == null) return null;
+  return (
+    <View style={styles.teamRow}>
+      <View style={styles.ouSpacer} />
+      <Text style={styles.teamName} numberOfLines={1}>
+        O/U
+      </Text>
+      <View style={styles.numCols}>
+        <Text style={styles.numText}>{formatTotal(market)}</Text>
+        <Text style={[styles.numText, styles.numTextModel]}>{formatTotal(model)}</Text>
+      </View>
     </View>
   );
 }
@@ -173,6 +190,10 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: '#d0d7de',
   },
+  ouSpacer: {
+    width: 16,
+    height: 16,
+  },
   teamName: {
     fontSize: 13,
     fontWeight: '700',
@@ -221,6 +242,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#0b1d3a',
   },
+
   noPick: {
     fontSize: 11,
     color: '#8b949e',

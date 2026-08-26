@@ -38,6 +38,7 @@ export default function GameDetailScreen() {
             venue: {},
             ensemblePicks: { $: { order: { computedAt: 'desc' } } },
             weatherForecasts: {},
+            odds: {},
           },
         }
       : null,
@@ -62,6 +63,7 @@ export default function GameDetailScreen() {
   }
 
   const pick = game.ensemblePicks?.[0];
+  const openLine = game.odds?.[0];
   const rankFor = (team: any) => team?.pollRankings?.find((pr: any) => pr.week === game.week)?.rank;
 
   return (
@@ -100,6 +102,23 @@ export default function GameDetailScreen() {
       ) : null}
 
       <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Ensemble Picks</Text>
+        {pick ? (
+          <>
+            <Row label="Spread (ATS)" value={`${pick.atsPick ?? '—'} (market ${formatSpread(pick.marketHomeSpread)})`} />
+            <Row label="Opening spread" value={formatSpread(openLine?.openHomeSpread)} />
+            <Row label="Total (O/U)" value={`${pick.totalPick ?? '—'} (market ${pick.marketTotal?.toFixed(1) ?? '—'}, model ${pick.predictedTotal?.toFixed(1) ?? '—'})`} />
+            <Row label="Opening total (O/U)" value={openLine?.openOverUnder != null ? openLine.openOverUnder.toFixed(1) : '—'} />
+            <Row label="Moneyline" value={pick.mlPick ?? '—'} />
+            <Row label="Model margin (raw / adjusted)" value={`${formatSpread(pick.rawPredictedMargin)} / ${formatSpread(pick.adjustedPredictedMargin)}`} />
+            {pick.adjustmentNotes ? <Row label="Adjustment notes" value={pick.adjustmentNotes} /> : null}
+          </>
+        ) : (
+          <Text style={styles.dim}>No ensemble pick computed yet for this game.</Text>
+        )}
+      </View>
+
+      <View style={styles.section}>
         <Text style={styles.sectionTitle}>Coaching</Text>
         <CoachingTeam label={game.awayTeam?.school ?? 'Away'} team={game.awayTeam} />
         <CoachingTeam label={game.homeTeam?.school ?? 'Home'} team={game.homeTeam} />
@@ -109,21 +128,6 @@ export default function GameDetailScreen() {
         <Text style={styles.sectionTitle}>Recruiting and Portal Transfers</Text>
         <RecruitingPortalTeam label={game.awayTeam?.school ?? 'Away'} team={game.awayTeam} />
         <RecruitingPortalTeam label={game.homeTeam?.school ?? 'Home'} team={game.homeTeam} />
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Ensemble Picks</Text>
-        {pick ? (
-          <>
-            <Row label="Spread (ATS)" value={`${pick.atsPick ?? '—'} (market ${formatSpread(pick.marketHomeSpread)})`} />
-            <Row label="Total (O/U)" value={`${pick.totalPick ?? '—'} (market ${pick.marketTotal?.toFixed(1) ?? '—'}, model ${pick.predictedTotal?.toFixed(1) ?? '—'})`} />
-            <Row label="Moneyline" value={pick.mlPick ?? '—'} />
-            <Row label="Model margin (raw / adjusted)" value={`${formatSpread(pick.rawPredictedMargin)} / ${formatSpread(pick.adjustedPredictedMargin)}`} />
-            {pick.adjustmentNotes ? <Row label="Adjustment notes" value={pick.adjustmentNotes} /> : null}
-          </>
-        ) : (
-          <Text style={styles.dim}>No ensemble pick computed yet for this game.</Text>
-        )}
       </View>
 
       <View style={styles.section}>
