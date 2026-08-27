@@ -55,16 +55,20 @@ export interface VenueView {
   dome?: boolean;
 }
 
+// Market/pick fields are `| null`, not just `?`/undefined, because InstantDB
+// stores an explicit null to clear a field a previous ETL run had set (e.g.
+// an edge that shrank back under a pick's threshold) — see the comment on
+// the ensemble_picks write in scripts/etl/ensemble.ts.
 export interface PickView {
-  atsPick?: string;
-  atsConfidence?: string;
-  totalPick?: string;
-  totalConfidence?: string;
-  mlPick?: string;
-  mlEdge?: number;
-  marketHomeSpread?: number;
-  marketTotal?: number;
-  predictedTotal?: number;
+  atsPick?: string | null;
+  atsConfidence?: string | null;
+  totalPick?: string | null;
+  totalConfidence?: string | null;
+  mlPick?: string | null;
+  mlEdge?: number | null;
+  marketHomeSpread?: number | null;
+  marketTotal?: number | null;
+  predictedTotal?: number | null;
   adjustedPredictedMargin?: number;
   adjustmentNotes?: string;
 }

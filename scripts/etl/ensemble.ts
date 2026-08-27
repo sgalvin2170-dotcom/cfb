@@ -141,13 +141,25 @@ export async function runEnsemble(week?: number) {
   // (multiplied across every team in this week's games) is what was timing
   // out InstantDB. Scoping to a short recent window keeps the join cheap
   // while still tolerating a source that failed to scrape yesterday.
+  //
+  // Filtered on `scrapedAt` (when *we* fetched the row), not `asOfDate` (the
+  // source's own self-reported content date) — those aren't the same thing.
+  // ESPN FPI's `asOfDate` is ESPN's last-recalculated timestamp for their
+  // power index, which sat at 2026-07-21 for weeks straight even though we
+  // scraped it fresh every single day; an asOfDate-based cutoff silently
+  // excluded FPI — the largest-weighted source (0.493) — from every live
+  // pick from 2026-08-21 (when this cutoff was added) until this comment was
+  // written. `scrapedAt` is always "now" at write time regardless of source,
+  // so it's the correct, uniform recency signal for bounding query cost —
+  // latestMetrics() below already keys its own dedup off `scrapedAt` for the
+  // same reason.
   const ratingsCutoff = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
 
   const { games } = await db.query({
     games: {
       $: { where: week != null ? { season: env.season, week } : { season: env.season } },
-      homeTeam: { ratings: { $: { where: { asOfDate: { $gte: ratingsCutoff } } } } },
-      awayTeam: { ratings: { $: { where: { asOfDate: { $gte: ratingsCutoff } } } } },
+      homeTeam: { ratings: { $: { where: { scrapedAt: { $gte: ratingsCutoff } } } } },
+      awayTeam: { ratings: { $: { where: { scrapedAt: { $gte: ratingsCutoff } } } } },
       odds: {},
       weatherForecasts: {},
     },
@@ -245,17 +257,25 @@ export async function runEnsemble(week?: number) {
           modelVersion,
           rawPredictedMargin: predictedMargin,
           adjustedPredictedMargin: predictedMargin,
-          predictedTotal,
+          // These fields are ?? null, not left as plain `undefined`, because
+          // db.transact() JSON-serializes its payload and JSON.stringify
+          // silently drops undefined-valued keys — so an undefined field
+          // here wouldn't clear a value written by an earlier run, it just
+          // wouldn't be sent at all, leaving the stale value in place
+          // forever (e.g. a game's ML edge shrinking back under threshold
+          // would never clear a previously-set mlPick). Explicit null is
+          // InstantDB's real "clear this optional field" value.
+          predictedTotal: predictedTotal ?? null,
           predictedHomeWinProb,
-          marketHomeSpread: odds?.homeSpread,
-          marketTotal: odds?.overUnder,
-          marketImpliedHomeProb,
-          atsPick,
-          atsConfidence,
-          totalPick,
-          totalConfidence,
-          mlPick,
-          mlEdge,
+          marketHomeSpread: odds?.homeSpread ?? null,
+          marketTotal: odds?.overUnder ?? null,
+          marketImpliedHomeProb: marketImpliedHomeProb ?? null,
+          atsPick: atsPick ?? null,
+          atsConfidence: atsConfidence ?? null,
+          totalPick: totalPick ?? null,
+          totalConfidence: totalConfidence ?? null,
+          mlPick: mlPick ?? null,
+          mlEdge: mlEdge ?? null,
           adjustmentNotes: `blend of ${contributions.length} margin source(s) (${v2Weights ? 'fitted weights' : 'equal weight'}): ${contributions
             .map((c: MarginContribution) => c.source)
             .join(', ')}${predictedTotal != null ? '; total from fei' : ''}${windNote ? `; ${windNote}` : ''}`,

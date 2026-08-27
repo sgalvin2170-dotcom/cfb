@@ -69,7 +69,7 @@ const _schema = i.schema({
       asOfDate: i.date().indexed(),
       metricName: i.string().indexed(),
       value: i.number(),
-      scrapedAt: i.date(),
+      scrapedAt: i.date().indexed(),
     }),
 
     odds: i.entity({

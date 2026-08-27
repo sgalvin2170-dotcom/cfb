@@ -21,7 +21,7 @@ interface BestBet {
   game: GameView;
   market: 'ATS' | 'Total' | 'ML';
   pickLabel: string;
-  confidence?: string;
+  confidence?: string | null;
   strength: number;
   edgeText: string;
   reason: string;

@@ -68,7 +68,7 @@ export default function GameCard({ game }: { game: GameView }) {
   );
 }
 
-function TeamRow({ team, market, model }: { team?: TeamView; market?: number; model?: number }) {
+function TeamRow({ team, market, model }: { team?: TeamView; market?: number | null; model?: number | null }) {
   return (
     <View style={styles.teamRow}>
       {team?.logoUrl ? (
@@ -90,7 +90,7 @@ function TeamRow({ team, market, model }: { team?: TeamView; market?: number; mo
   );
 }
 
-function TotalRow({ market, model }: { market?: number; model?: number }) {
+function TotalRow({ market, model }: { market?: number | null; model?: number | null }) {
   if (market == null && model == null) return null;
   return (
     <View style={styles.teamRow}>
@@ -106,7 +106,7 @@ function TotalRow({ market, model }: { market?: number; model?: number }) {
   );
 }
 
-function PickChip({ label, value, confidence }: { label: string; value: string; confidence?: string }) {
+function PickChip({ label, value, confidence }: { label: string; value: string; confidence?: string | null }) {
   const color = confidenceColor(confidence);
   return (
     <View style={[styles.chip, { borderColor: color }]}>
