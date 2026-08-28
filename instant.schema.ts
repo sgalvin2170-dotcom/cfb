@@ -243,6 +243,26 @@ const _schema = i.schema({
       computedAt: i.date().indexed(),
     }),
 
+    // Preseason roster-composition score per team — a single upserted
+    // snapshot (like `coaches`/`talent`), not accumulated history. Raw
+    // inputs (roster_continuity's whole-roster overlap count, summed
+    // incoming-transfer rating, 247Sports composite points) are on
+    // unrelated, arbitrary scales, so every component here is a
+    // league-wide percentile (0-100) rather than a raw value — see
+    // scripts/etl/upsertPreseasonScores.ts for exactly how each is derived
+    // and the formula that blends them.
+    preseason_scores: i.entity({
+      // "{teamId}:{season}" — idempotent upsert key.
+      scoreKey: i.string().unique().indexed(),
+      season: i.number().indexed(),
+      talentPercentile: i.number(),
+      returningProductionScore: i.number(),
+      transferPortalScore: i.number(),
+      recruitingScore: i.number(),
+      rosterScore: i.number(),
+      computedAt: i.date().indexed(),
+    }),
+
     scrape_runs: i.entity({
       source: i.string().indexed(),
       startedAt: i.date(),
@@ -317,6 +337,10 @@ const _schema = i.schema({
     coachTeam: {
       forward: { on: 'coaches', has: 'one', label: 'team' },
       reverse: { on: 'teams', has: 'many', label: 'coaches' },
+    },
+    preseasonScoreTeam: {
+      forward: { on: 'preseason_scores', has: 'one', label: 'team' },
+      reverse: { on: 'teams', has: 'many', label: 'preseasonScores' },
     },
   },
 });

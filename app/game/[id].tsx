@@ -8,6 +8,16 @@ import { runMonteCarlo } from '../../lib/monteCarlo';
 
 const MODEL_VERSION = 'v2-fitted';
 
+// Display-only reference schedule (see scripts/etl/upsertPreseasonScores.ts
+// for the roster-score formula itself) — not wired into the live ensemble
+// margin, which has its own weighting scheme.
+const DECAY_SCHEDULE = [
+  { week: 1, preseasonPct: 100 },
+  { week: 2, preseasonPct: 75 },
+  { week: 3, preseasonPct: 50 },
+  { week: 4, preseasonPct: 25 },
+];
+
 const CURRENT_SEASON = Number(process.env.EXPO_PUBLIC_CFB_SEASON ?? new Date().getFullYear());
 
 export default function GameDetailScreen() {
@@ -22,6 +32,7 @@ export default function GameDetailScreen() {
               ratings: {},
               talent: {},
               coaches: {},
+              preseasonScores: { $: { where: { season: CURRENT_SEASON } } },
               recruitingClasses: { $: { where: { season: CURRENT_SEASON } } },
               rosterContinuity: { $: { where: { season: CURRENT_SEASON } } },
               portalIn: { $: { where: { season: CURRENT_SEASON } } },
@@ -32,6 +43,7 @@ export default function GameDetailScreen() {
               ratings: {},
               talent: {},
               coaches: {},
+              preseasonScores: { $: { where: { season: CURRENT_SEASON } } },
               recruitingClasses: { $: { where: { season: CURRENT_SEASON } } },
               rosterContinuity: { $: { where: { season: CURRENT_SEASON } } },
               portalIn: { $: { where: { season: CURRENT_SEASON } } },
@@ -178,6 +190,25 @@ export default function GameDetailScreen() {
       </View>
 
       <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Preseason Roster Weights</Text>
+        <PreseasonWeightsTeam label={game.awayTeam?.school ?? 'Away'} team={game.awayTeam} />
+        <PreseasonWeightsTeam label={game.homeTeam?.school ?? 'Home'} team={game.homeTeam} />
+        <View style={styles.notableList}>
+          <Text style={styles.notableTitle}>Weight decay by game</Text>
+          {DECAY_SCHEDULE.map(({ week, preseasonPct }) => (
+            <Text key={week} style={[styles.notableItem, game.week === week ? styles.decayCurrent : null]}>
+              {game.week === week ? '▶ ' : ''}
+              Game {week}: {preseasonPct}% preseason roster / {100 - preseasonPct}% on-field data
+            </Text>
+          ))}
+          {game.week > DECAY_SCHEDULE.length ? (
+            <Text style={[styles.notableItem, styles.decayCurrent]}>▶ Game {game.week}: 0% preseason roster / 100% on-field data</Text>
+          ) : null}
+        </View>
+        <Text style={styles.dim}>Reference only — not yet blended into the Ensemble Picks above.</Text>
+      </View>
+
+      <View style={styles.section}>
         <Text style={styles.sectionTitle}>Recruiting and Portal Transfers</Text>
         <RecruitingPortalTeam label={game.awayTeam?.school ?? 'Away'} team={game.awayTeam} />
         <RecruitingPortalTeam label={game.homeTeam?.school ?? 'Home'} team={game.homeTeam} />
@@ -239,6 +270,27 @@ function CoachingTeam({ label, team }: { label: string; team: any }) {
         </>
       ) : (
         <Text style={styles.dim}>No coaching data available yet.</Text>
+      )}
+    </View>
+  );
+}
+
+function PreseasonWeightsTeam({ label, team }: { label: string; team: any }) {
+  const score = team?.preseasonScores?.[0];
+
+  return (
+    <View style={styles.teamBlock}>
+      <Text style={styles.teamBlockTitle}>{label}</Text>
+      {score ? (
+        <>
+          <Row label="Roster Talent Score" value={`${score.talentPercentile.toFixed(0)}th percentile`} />
+          <Row label="Returning Production" value={score.returningProductionScore.toFixed(0)} />
+          <Row label="Transfer Portal" value={score.transferPortalScore.toFixed(0)} />
+          <Row label="Recruiting" value={score.recruitingScore.toFixed(0)} />
+          <Row label="Preseason Roster Score" value={score.rosterScore.toFixed(1)} />
+        </>
+      ) : (
+        <Text style={styles.dim}>No preseason roster data available yet.</Text>
       )}
     </View>
   );
@@ -416,6 +468,10 @@ const styles = StyleSheet.create({
   notableItem: {
     fontSize: 12,
     color: '#57606a',
+  },
+  decayCurrent: {
+    color: '#0b1d3a',
+    fontWeight: '700',
   },
   arrowIn: {
     color: '#1a7f37',
