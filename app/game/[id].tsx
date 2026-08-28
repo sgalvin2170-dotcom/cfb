@@ -4,6 +4,9 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-nat
 import TeamBadge from '../../components/TeamBadge';
 import { formatKickoff, formatSpread } from '../../lib/format';
 import { db } from '../../lib/db';
+import { runMonteCarlo } from '../../lib/monteCarlo';
+
+const MODEL_VERSION = 'v2-fitted';
 
 const CURRENT_SEASON = Number(process.env.EXPO_PUBLIC_CFB_SEASON ?? new Date().getFullYear());
 
@@ -40,6 +43,7 @@ export default function GameDetailScreen() {
             weatherForecasts: {},
             odds: {},
           },
+          model_weights: { $: { where: { modelVersion: MODEL_VERSION, sourceName: 'team_score_sigma' } } },
         }
       : null,
   );
@@ -65,6 +69,21 @@ export default function GameDetailScreen() {
   const pick = game.ensemblePicks?.[0];
   const openLine = game.odds?.[0];
   const rankFor = (team: any) => team?.pollRankings?.find((pr: any) => pr.week === game.week)?.rank;
+
+  const scoreSigma = data?.model_weights?.[0]?.weight as number | undefined;
+  const windMph = game.weatherForecasts?.[0]?.windMph;
+  const simulation =
+    pick && pick.predictedTotal != null && scoreSigma != null
+      ? runMonteCarlo({
+          gameId: game.id,
+          homeMean: (pick.predictedTotal + pick.adjustedPredictedMargin) / 2,
+          awayMean: (pick.predictedTotal - pick.adjustedPredictedMargin) / 2,
+          sigma: scoreSigma,
+          windMph,
+          marketHomeSpread: pick.marketHomeSpread,
+          marketTotal: pick.marketTotal,
+        })
+      : undefined;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -115,6 +134,40 @@ export default function GameDetailScreen() {
           </>
         ) : (
           <Text style={styles.dim}>No ensemble pick computed yet for this game.</Text>
+        )}
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Monte Carlo Simulation</Text>
+        {simulation ? (
+          <>
+            <Row
+              label="Win probability"
+              value={`${game.homeTeam?.school ?? 'Home'} ${(simulation.homeWinProb * 100).toFixed(0)}% / ${game.awayTeam?.school ?? 'Away'} ${(simulation.awayWinProb * 100).toFixed(0)}%`}
+            />
+            {simulation.homeCoverProb != null ? (
+              <Row
+                label={`Covers ${formatSpread(pick.marketHomeSpread)}`}
+                value={`${game.homeTeam?.school ?? 'Home'} ${(simulation.homeCoverProb * 100).toFixed(0)}% / ${game.awayTeam?.school ?? 'Away'} ${(simulation.awayCoverProb! * 100).toFixed(0)}%`}
+              />
+            ) : null}
+            {simulation.overProb != null ? (
+              <Row
+                label="Over / Under"
+                value={`Over ${(simulation.overProb * 100).toFixed(0)}% / Under ${(simulation.underProb! * 100).toFixed(0)}%`}
+              />
+            ) : null}
+            <Row
+              label="Median simulated score"
+              value={`${game.homeTeam?.school ?? 'Home'} ${simulation.medianHomeScore} – ${game.awayTeam?.school ?? 'Away'} ${simulation.medianAwayScore}`}
+            />
+            <Row
+              label="Simulation detail"
+              value={`${simulation.trials.toLocaleString()} trials, σ=${simulation.sigma.toFixed(1)} pts/team`}
+            />
+          </>
+        ) : (
+          <Text style={styles.dim}>Not enough data to simulate this game yet.</Text>
         )}
       </View>
 
