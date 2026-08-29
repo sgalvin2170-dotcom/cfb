@@ -3,6 +3,7 @@
 // TeamRankings + ThePredictionTracker + Open-Meteo weather -> v1
 // equal-weight ensemble -> ATS/O-U/ML picks. Injuries still pending.
 import { runCfbdVerticalSlice } from './upsertCore';
+import { runGameTeamStatsIngestion } from './upsertGameTeamStats';
 import { runRatingsIngestion } from './upsertRatings';
 import { runWeatherIngestion } from './upsertWeather';
 import { runRecruitingPortalIngestion } from './upsertRecruitingPortal';
@@ -21,6 +22,7 @@ async function main() {
   const cfbdResult = await runCfbdVerticalSlice(week);
   console.log('CFBD summary:', cfbdResult);
 
+  await runGameTeamStatsIngestion();
   await runRatingsIngestion();
   await runWeatherIngestion(week);
   await runRecruitingPortalIngestion();

@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import GameCard from '../../components/GameCard';
 import WeekSelector from '../../components/WeekSelector';
-import { formatDateHeader } from '../../lib/format';
+import { formatDateHeader, etDateKey } from '../../lib/format';
 import { useSeasonGames } from '../../lib/useSeasonGames';
 import type { GameView } from '../../lib/types';
 
@@ -19,8 +19,7 @@ interface DateColumn {
 function groupByCalendarDay(games: GameView[]): DateColumn[] {
   const map = new Map<string, GameView[]>();
   for (const game of games) {
-    const d = new Date(game.startDate);
-    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    const key = etDateKey(game.startDate);
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(game);
   }

@@ -55,6 +55,9 @@ const _schema = i.schema({
       startDate: i.date().indexed(),
       neutralSite: i.boolean(),
       tv: i.string().optional(),
+      completed: i.boolean().indexed().optional(),
+      homePoints: i.number().optional(),
+      awayPoints: i.number().optional(),
     }),
 
     // Tidy/long format so every rating source (including ESPN FPI's several
@@ -243,6 +246,24 @@ const _schema = i.schema({
       computedAt: i.date().indexed(),
     }),
 
+    // Final box-score stats, one row per team per completed game. CFBD's
+    // /games/teams returns a flat category/stat string-pair list (~25
+    // categories, most not relevant here) rather than a typed schema — this
+    // keeps just the four Post-Game Analysis needs. `netPassingYards` is
+    // CFBD's own category name (stored here as `passingYards` for display
+    // clarity); `possessionTime` stays as CFBD's raw "MM:SS" string.
+    game_team_stats: i.entity({
+      // "{cfbdGameId}:{teamId}" — idempotent upsert key; a completed game's
+      // box score never changes, so re-fetching just overwrites with the
+      // same values.
+      statsKey: i.string().unique().indexed(),
+      rushingYards: i.number().optional(),
+      passingYards: i.number().optional(),
+      turnovers: i.number().optional(),
+      possessionTime: i.string().optional(),
+      computedAt: i.date().indexed(),
+    }),
+
     // Preseason roster-composition score per team — a single upserted
     // snapshot (like `coaches`/`talent`), not accumulated history. Raw
     // inputs (roster_continuity's whole-roster overlap count, summed
@@ -341,6 +362,14 @@ const _schema = i.schema({
     preseasonScoreTeam: {
       forward: { on: 'preseason_scores', has: 'one', label: 'team' },
       reverse: { on: 'teams', has: 'many', label: 'preseasonScores' },
+    },
+    gameTeamStatsGame: {
+      forward: { on: 'game_team_stats', has: 'one', label: 'game' },
+      reverse: { on: 'games', has: 'many', label: 'teamStats' },
+    },
+    gameTeamStatsTeam: {
+      forward: { on: 'game_team_stats', has: 'one', label: 'team' },
+      reverse: { on: 'teams', has: 'many', label: 'gameStats' },
     },
   },
 });

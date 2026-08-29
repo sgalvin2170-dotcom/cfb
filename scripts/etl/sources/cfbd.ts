@@ -231,3 +231,29 @@ export function fetchCoachesForSeason(year: number = env.season): Promise<CfbdCo
 export function fetchCoachCareer(firstName: string, lastName: string): Promise<CfbdCoach[]> {
   return cfbdGet<CfbdCoach[]>('/coaches', { firstName, lastName });
 }
+
+export interface CfbdGameTeamStat {
+  category: string;
+  stat: string;
+}
+
+export interface CfbdGameTeamStatsTeam {
+  teamId: number;
+  team: string;
+  homeAway: 'home' | 'away';
+  points?: number;
+  stats: CfbdGameTeamStat[];
+}
+
+export interface CfbdGameTeamStats {
+  id: number;
+  teams: CfbdGameTeamStatsTeam[];
+}
+
+// One call covers a whole week's box scores (confirmed against the live
+// API: ~100+ games returned per call) — `gameId` looks like a documented
+// filter param but is silently ignored in practice, `week` is what actually
+// scopes the response, so this always fetches by week rather than per-game.
+export function fetchGameTeamStats(week: number, year: number = env.season): Promise<CfbdGameTeamStats[]> {
+  return cfbdGet<CfbdGameTeamStats[]>('/games/teams', { year, week, seasonType: 'regular' });
+}

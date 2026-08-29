@@ -89,6 +89,9 @@ async function upsertGames(games: CfbdGame[], knownTeamIds: Set<number>) {
       seasonType: game.seasonType,
       startDate: game.startDate,
       neutralSite: game.neutralSite,
+      completed: game.completed ?? null,
+      homePoints: game.homePoints ?? null,
+      awayPoints: game.awayPoints ?? null,
     });
 
     const linkTx = db.tx.games.lookup('cfbdGameId', game.id).link({
@@ -155,10 +158,22 @@ async function upsertOdds(
   lines: CfbdGameLines[],
   playableGameIds: Set<number>,
 ) {
-  const now = new Date().toISOString();
+  const nowDate = new Date();
+  const now = nowDate.toISOString();
 
+  let frozen = 0;
   const txs = lines
-    .filter((line) => gamesById.has(line.id) && playableGameIds.has(line.id) && line.lines.length > 0)
+    .filter((line) => {
+      if (!gamesById.has(line.id) || !playableGameIds.has(line.id) || line.lines.length === 0) return false;
+      // Once a game kicks off, the market line is done moving for our
+      // purposes — freeze whatever was last captured instead of overwriting
+      // it with post-kickoff/closing data, so Post-Game Analysis always has
+      // the true last pregame line to grade against, not something that
+      // drifted after the fact.
+      const started = new Date(gamesById.get(line.id)!.startDate) <= nowDate;
+      if (started) frozen++;
+      return !started;
+    })
     .map((line) => {
       const preferred =
         line.lines.find((l) => l.provider?.toLowerCase() === 'consensus') ?? mostCompleteLine(line.lines);
@@ -175,6 +190,10 @@ async function upsertOdds(
         capturedAt: now,
       }).link({ game: lookup('cfbdGameId', line.id) });
     });
+
+  if (frozen > 0) {
+    console.log(`[cfbd:lines] left ${frozen} already-started game(s)' odds untouched (frozen at kickoff)`);
+  }
 
   await transactInChunks(txs);
   return txs.length;
