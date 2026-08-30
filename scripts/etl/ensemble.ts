@@ -172,11 +172,23 @@ export async function runEnsemble(week?: number) {
   }
   const predTrackerByPair = await fetchPredictionTrackerByGamePair(teamsInPlay);
 
-  const now = new Date().toISOString();
+  const nowDate = new Date();
+  const now = nowDate.toISOString();
   let computed = 0;
   let skippedNoSources = 0;
+  let frozen = 0;
 
   const txs = (games as any[]).flatMap((game) => {
+    // Once a game has kicked off, freeze whatever pick was last computed —
+    // Post-Game Analysis needs "what the model thought going in," not a
+    // number that keeps drifting as ratings data refreshes for a game
+    // that's already being (or already was) played. Same kickoff boundary
+    // upsertOdds already freezes market lines on, for the same reason.
+    if (new Date(game.startDate) <= nowDate) {
+      frozen++;
+      return [];
+    }
+
     const { contributions, predictedTotal } = computeMarginContributions(
       game.homeTeam?.ratings ?? [],
       game.awayTeam?.ratings ?? [],
@@ -287,7 +299,7 @@ export async function runEnsemble(week?: number) {
 
   await transactInChunks(txs);
   console.log(
-    `[ensemble] (${modelVersion}) computed ${computed} pick(s), skipped ${skippedNoSources} game(s) with no available rating source`,
+    `[ensemble] (${modelVersion}) computed ${computed} pick(s), left ${frozen} already-started game(s) frozen, skipped ${skippedNoSources} game(s) with no available rating source`,
   );
   return computed;
 }

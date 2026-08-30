@@ -1,14 +1,27 @@
-// Box-score ETL step: CFBD /games/teams -> InstantDB `game_team_stats`.
-// Needs games (with `completed`/points) already upserted. A completed
-// game's box score never changes, so this is safe to re-run every day —
-// idempotent upsert key, and re-fetching an old week just overwrites with
-// the same values.
+// Box-score ETL step: CFBD /games/teams + /drives + /games/players ->
+// InstantDB `game_team_stats`. Needs games (with `completed`/points)
+// already upserted.
+//
+// A completed game's box score never changes, so this only fetches a week
+// at all if at least one of its completed games is still missing a stats
+// row — three CFBD calls per week (up from one, now that drives/field
+// goals are included) would be wasteful to repeat daily for weeks already
+// fully captured, and at ~15 weeks/season that's real budget (see the same
+// concern already documented for the coaches step). This gate means a
+// settled week costs nothing on every subsequent run; only a week with a
+// newly-completed game gets re-fetched.
 import { lookup } from '@instantdb/admin';
 
 import { db, transactInChunks } from './instantAdmin';
 import { recordRun } from './upsertCore';
 import { env } from './env';
-import { fetchGameTeamStats, type CfbdGameTeamStat, type CfbdGameTeamStats } from './sources/cfbd';
+import {
+  fetchDrives,
+  fetchGamePlayerStats,
+  fetchGameTeamStats,
+  type CfbdGameTeamStat,
+  type CfbdGameTeamStats,
+} from './sources/cfbd';
 
 function statValue(stats: CfbdGameTeamStat[], category: string): string | undefined {
   return stats.find((s) => s.category === category)?.stat;
@@ -21,15 +34,65 @@ function statNumber(stats: CfbdGameTeamStat[], category: string): number | undef
   return Number.isNaN(n) ? undefined : n;
 }
 
+// Sums "made/attempted" fractions across however many kickers a team used
+// (almost always exactly one) — e.g. two entries "1/1" + "1/2" -> "2/3".
+function sumFractions(fractions: string[]): string | undefined {
+  if (fractions.length === 0) return undefined;
+  let made = 0;
+  let attempted = 0;
+  for (const f of fractions) {
+    const [m, a] = f.split('/').map(Number);
+    if (Number.isNaN(m) || Number.isNaN(a)) continue;
+    made += m;
+    attempted += a;
+  }
+  return `${made}/${attempted}`;
+}
+
+async function buildDriveCounts(week: number): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  try {
+    const drives = await fetchDrives(week);
+    for (const d of drives) {
+      const key = `${d.gameId}:${d.offense}`;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  } catch (err) {
+    console.warn(`[game-team-stats] could not fetch drives for week ${week}:`, err);
+  }
+  return counts;
+}
+
+async function buildFieldGoals(week: number): Promise<Map<string, string>> {
+  const fgByGameTeam = new Map<string, string>();
+  try {
+    const playerGames = await fetchGamePlayerStats(week);
+    for (const game of playerGames) {
+      for (const team of game.teams) {
+        const kicking = team.categories.find((c) => c.name === 'kicking');
+        const fgType = kicking?.types.find((t) => t.name === 'FG');
+        const fractions = fgType?.athletes.map((a) => a.stat) ?? [];
+        const summed = sumFractions(fractions);
+        if (summed) fgByGameTeam.set(`${game.id}:${team.team}`, summed);
+      }
+    }
+  } catch (err) {
+    console.warn(`[game-team-stats] could not fetch player stats (field goals) for week ${week}:`, err);
+  }
+  return fgByGameTeam;
+}
+
 async function upsertGameTeamStats() {
   const { games, teams } = await db.query({
-    games: { $: { where: { season: env.season, completed: true } } },
+    games: { $: { where: { season: env.season, completed: true } }, teamStats: {} },
     teams: {},
   });
-  const weeks = [...new Set((games as any[]).map((g) => g.week))].sort((a, b) => a - b);
-  if (weeks.length === 0) {
+  const incomplete = (games as any[]).filter((g) => (g.teamStats?.length ?? 0) < 2);
+  const weeksNeeded = [...new Set(incomplete.map((g) => g.week))].sort((a, b) => a - b);
+  if (weeksNeeded.length === 0) {
     return 0;
   }
+
   const knownGameIds = new Set((games as any[]).map((g) => g.cfbdGameId));
   const knownTeamIds = new Set((teams as any[]).map((t) => t.cfbdTeamId));
 
@@ -37,7 +100,7 @@ async function upsertGameTeamStats() {
   let skipped = 0;
   const txs: any[] = [];
 
-  for (const week of weeks) {
+  for (const week of weeksNeeded) {
     let weekGames: CfbdGameTeamStats[];
     try {
       weekGames = await fetchGameTeamStats(week);
@@ -45,6 +108,8 @@ async function upsertGameTeamStats() {
       console.warn(`[game-team-stats] could not fetch week ${week}:`, err);
       continue;
     }
+
+    const [driveCounts, fieldGoals] = await Promise.all([buildDriveCounts(week), buildFieldGoals(week)]);
 
     for (const game of weekGames) {
       // /games/teams returns every game that week, including ones we never
@@ -65,6 +130,13 @@ async function upsertGameTeamStats() {
               passingYards: statNumber(teamEntry.stats, 'netPassingYards') ?? null,
               turnovers: statNumber(teamEntry.stats, 'turnovers') ?? null,
               possessionTime: statValue(teamEntry.stats, 'possessionTime') ?? null,
+              thirdDownConv: statValue(teamEntry.stats, 'thirdDownEff') ?? null,
+              rushingTDs: statNumber(teamEntry.stats, 'rushingTDs') ?? null,
+              passingTDs: statNumber(teamEntry.stats, 'passingTDs') ?? null,
+              firstDowns: statNumber(teamEntry.stats, 'firstDowns') ?? null,
+              penalties: statValue(teamEntry.stats, 'totalPenaltiesYards') ?? null,
+              drives: driveCounts.get(`${game.id}:${teamEntry.team}`) ?? null,
+              fieldGoals: fieldGoals.get(`${game.id}:${teamEntry.team}`) ?? null,
               computedAt: now,
             })
             .link({ game: lookup('cfbdGameId', game.id), team: lookup('cfbdTeamId', teamEntry.teamId) }),

@@ -249,9 +249,13 @@ const _schema = i.schema({
     // Final box-score stats, one row per team per completed game. CFBD's
     // /games/teams returns a flat category/stat string-pair list (~25
     // categories, most not relevant here) rather than a typed schema — this
-    // keeps just the four Post-Game Analysis needs. `netPassingYards` is
-    // CFBD's own category name (stored here as `passingYards` for display
-    // clarity); `possessionTime` stays as CFBD's raw "MM:SS" string.
+    // keeps just the Post-Game Analysis needs. `netPassingYards` is CFBD's
+    // own category name (stored here as `passingYards` for display
+    // clarity); `possessionTime`/`thirdDownConv`/`penalties` stay as CFBD's
+    // raw "MM:SS"/"7-12"/"2-25" strings. `fieldGoals` ("2/3") and `drives` come from
+    // two additional endpoints (/games/players, /drives) that /games/teams
+    // doesn't cover — see upsertGameTeamStats.ts for why those are gated
+    // more carefully than the rest of this table.
     game_team_stats: i.entity({
       // "{cfbdGameId}:{teamId}" — idempotent upsert key; a completed game's
       // box score never changes, so re-fetching just overwrites with the
@@ -261,6 +265,13 @@ const _schema = i.schema({
       passingYards: i.number().optional(),
       turnovers: i.number().optional(),
       possessionTime: i.string().optional(),
+      thirdDownConv: i.string().optional(),
+      rushingTDs: i.number().optional(),
+      passingTDs: i.number().optional(),
+      fieldGoals: i.string().optional(),
+      drives: i.number().optional(),
+      firstDowns: i.number().optional(),
+      penalties: i.string().optional(),
       computedAt: i.date().indexed(),
     }),
 

@@ -74,6 +74,10 @@ function PostGameCard({ game }: { game: any }) {
   const actualTotal = hasScore ? game.homePoints + game.awayPoints : undefined;
   const modelSpread = pick?.adjustedPredictedMargin != null ? -pick.adjustedPredictedMargin : undefined;
 
+  const atsTeamPicked =
+    pick?.atsPick === 'home' ? game.homeTeam?.school : pick?.atsPick === 'away' ? game.awayTeam?.school : undefined;
+  const totalPickLabel = pick?.totalPick ? pick.totalPick.toUpperCase() : undefined;
+
   const atsGrade = showAts ? gradeAts(pick.atsPick, game.homePoints, game.awayPoints, odds?.homeSpread) : undefined;
   const totalGrade = showTotal ? gradeTotal(pick.totalPick, game.homePoints, game.awayPoints, odds?.overUnder) : undefined;
 
@@ -86,7 +90,9 @@ function PostGameCard({ game }: { game: any }) {
 
       {showAts ? (
         <SelectionRow
-          label={`ATS (${pick.atsConfidence})`}
+          label="ATS"
+          confidence={pick.atsConfidence}
+          pickLabel={atsTeamPicked}
           model={formatSpread(modelSpread)}
           market={formatSpread(odds?.homeSpread)}
           actual={formatSpread(actualSpread)}
@@ -96,7 +102,9 @@ function PostGameCard({ game }: { game: any }) {
 
       {showTotal ? (
         <SelectionRow
-          label={`Total (${pick.totalConfidence})`}
+          label="Total"
+          confidence={pick.totalConfidence}
+          pickLabel={totalPickLabel}
           model={formatTotal(pick?.predictedTotal)}
           market={formatTotal(odds?.overUnder)}
           actual={formatTotal(actualTotal)}
@@ -109,23 +117,34 @@ function PostGameCard({ game }: { game: any }) {
   );
 }
 
+// High/medium confidence get a colored highlight (green/orange) rather than
+// just the text label — this screen only ever shows high/medium selections
+// (low-confidence picks are filtered out above), so every row shown gets one
+// of the two.
 function SelectionRow({
   label,
+  confidence,
+  pickLabel,
   model,
   market,
   actual,
   grade,
 }: {
   label: string;
+  confidence: string | undefined;
+  pickLabel: string | undefined;
   model: string;
   market: string;
   actual: string;
   grade: Grade | undefined;
 }) {
+  const highlight = confidence === 'high' ? styles.highlightHigh : confidence === 'medium' ? styles.highlightMedium : null;
   return (
-    <View style={styles.selectionBlock}>
+    <View style={[styles.selectionBlock, highlight]}>
       <View style={styles.selectionHeader}>
-        <Text style={styles.selectionLabel}>{label}</Text>
+        <Text style={styles.selectionLabel}>
+          {label} ({confidence}){pickLabel ? ` — ${pickLabel}` : ''}
+        </Text>
         <Text style={[styles.gradeText, { color: gradeColor(grade) }]}>{grade ? grade.toUpperCase() : '—'}</Text>
       </View>
       <View style={styles.selectionNumbers}>
@@ -158,17 +177,26 @@ function BoxScoreTable({
   homeStats: any;
 }) {
   return (
-    <View style={styles.boxScore}>
-      <View style={styles.boxScoreRow}>
-        <Text style={styles.boxScoreRowLabel} />
-        <Text style={styles.boxScoreHeaderCell}>Rush</Text>
-        <Text style={styles.boxScoreHeaderCell}>Pass</Text>
-        <Text style={styles.boxScoreHeaderCell}>TO</Text>
-        <Text style={styles.boxScoreHeaderCell}>Poss</Text>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.boxScoreScroll}>
+      <View style={styles.boxScore}>
+        <View style={styles.boxScoreRow}>
+          <Text style={styles.boxScoreRowLabel} />
+          <Text style={styles.boxScoreHeaderCell}>Rush</Text>
+          <Text style={styles.boxScoreHeaderCell}>Pass</Text>
+          <Text style={styles.boxScoreHeaderCell}>TO</Text>
+          <Text style={styles.boxScoreHeaderCell}>Poss</Text>
+          <Text style={styles.boxScoreHeaderCell}>3rd Dn</Text>
+          <Text style={styles.boxScoreHeaderCell}>Rush TD</Text>
+          <Text style={styles.boxScoreHeaderCell}>Pass TD</Text>
+          <Text style={styles.boxScoreHeaderCell}>FG</Text>
+          <Text style={styles.boxScoreHeaderCell}>Drives</Text>
+          <Text style={styles.boxScoreHeaderCell}>1st Dn</Text>
+          <Text style={styles.boxScoreHeaderCell}>Pen</Text>
+        </View>
+        <BoxScoreRow label={awayLabel} stats={awayStats} />
+        <BoxScoreRow label={homeLabel} stats={homeStats} />
       </View>
-      <BoxScoreRow label={awayLabel} stats={awayStats} />
-      <BoxScoreRow label={homeLabel} stats={homeStats} />
-    </View>
+    </ScrollView>
   );
 }
 
@@ -182,6 +210,13 @@ function BoxScoreRow({ label, stats }: { label: string; stats: any }) {
       <Text style={styles.boxScoreCell}>{stats?.passingYards ?? '—'}</Text>
       <Text style={styles.boxScoreCell}>{stats?.turnovers ?? '—'}</Text>
       <Text style={styles.boxScoreCell}>{stats?.possessionTime ?? '—'}</Text>
+      <Text style={styles.boxScoreCell}>{stats?.thirdDownConv ?? '—'}</Text>
+      <Text style={styles.boxScoreCell}>{stats?.rushingTDs ?? '—'}</Text>
+      <Text style={styles.boxScoreCell}>{stats?.passingTDs ?? '—'}</Text>
+      <Text style={styles.boxScoreCell}>{stats?.fieldGoals ?? '—'}</Text>
+      <Text style={styles.boxScoreCell}>{stats?.drives ?? '—'}</Text>
+      <Text style={styles.boxScoreCell}>{stats?.firstDowns ?? '—'}</Text>
+      <Text style={styles.boxScoreCell}>{stats?.penalties ?? '—'}</Text>
     </View>
   );
 }
@@ -236,6 +271,24 @@ const styles = StyleSheet.create({
     paddingTop: 6,
     gap: 4,
   },
+  highlightHigh: {
+    backgroundColor: '#dafbe1',
+    borderTopWidth: 0,
+    borderLeftWidth: 4,
+    borderLeftColor: '#1a7f37',
+    paddingLeft: 8,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  highlightMedium: {
+    backgroundColor: '#ffe9d6',
+    borderTopWidth: 0,
+    borderLeftWidth: 4,
+    borderLeftColor: '#bf5b04',
+    paddingLeft: 8,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
   selectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -266,10 +319,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#0b1d3a',
   },
-  boxScore: {
+  boxScoreScroll: {
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: '#d0d7de',
     paddingTop: 6,
+  },
+  boxScore: {
     gap: 4,
   },
   boxScoreRow: {
@@ -281,22 +336,20 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#0b1d3a',
-    flexGrow: 1,
-    flexShrink: 1,
-    flexBasis: 0,
+    width: 90,
   },
   boxScoreHeaderCell: {
     fontSize: 10,
     fontWeight: '700',
     color: '#8b949e',
-    width: 48,
+    width: 46,
     textAlign: 'right',
   },
   boxScoreCell: {
     fontSize: 12,
     fontWeight: '600',
     color: '#57606a',
-    width: 48,
+    width: 46,
     textAlign: 'right',
   },
 });

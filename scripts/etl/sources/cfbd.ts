@@ -257,3 +257,45 @@ export interface CfbdGameTeamStats {
 export function fetchGameTeamStats(week: number, year: number = env.season): Promise<CfbdGameTeamStats[]> {
   return cfbdGet<CfbdGameTeamStats[]>('/games/teams', { year, week, seasonType: 'regular' });
 }
+
+export interface CfbdDrive {
+  gameId: number;
+  offense: string;
+}
+
+// One call covers a whole week (confirmed live: 762 drives for a ~50-game
+// week) — count entries grouped by (gameId, offense) for a team's drive
+// count in a given game.
+export function fetchDrives(week: number, year: number = env.season): Promise<CfbdDrive[]> {
+  return cfbdGet<CfbdDrive[]>('/drives', { year, week, seasonType: 'regular' });
+}
+
+export interface CfbdPlayerCategoryStat {
+  name: string;
+  athletes: Array<{ id: string; name: string; stat: string }>;
+}
+
+export interface CfbdPlayerCategory {
+  name: string;
+  types: CfbdPlayerCategoryStat[];
+}
+
+export interface CfbdGamePlayerStatsTeam {
+  team: string;
+  categories: CfbdPlayerCategory[];
+}
+
+export interface CfbdGamePlayerStats {
+  id: number;
+  teams: CfbdGamePlayerStatsTeam[];
+}
+
+// Unlike /games/teams and /drives, this one only returned 31/51 games for a
+// live week-1 check (some games' player box scores evidently aren't
+// processed by CFBD's provider yet even after final) — expect gaps, not a
+// complete set, and don't treat a missing game here as an error. Only field
+// goals (kicking -> FG type, e.g. "2/3") come from this endpoint; everything
+// else Post-Game Analysis needs is in /games/teams or /drives.
+export function fetchGamePlayerStats(week: number, year: number = env.season): Promise<CfbdGamePlayerStats[]> {
+  return cfbdGet<CfbdGamePlayerStats[]>('/games/players', { year, week, seasonType: 'regular' });
+}
