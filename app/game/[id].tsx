@@ -4,7 +4,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-nat
 import TeamBadge from '../../components/TeamBadge';
 import { formatKickoff, formatSpread } from '../../lib/format';
 import { db } from '../../lib/db';
-import { runMonteCarlo } from '../../lib/monteCarlo';
+import { runMonteCarlo, TRIALS } from '../../lib/monteCarlo';
 
 const MODEL_VERSION = 'v2-fitted';
 
@@ -84,18 +84,36 @@ export default function GameDetailScreen() {
 
   const scoreSigma = data?.model_weights?.[0]?.weight as number | undefined;
   const windMph = game.weatherForecasts?.[0]?.windMph;
+  // Prefer the simulation the ETL already ran and (once this game starts)
+  // froze — see scripts/etl/ensemble.ts — so this screen and Post-Game
+  // Analysis can't show two different numbers for the same game. Only
+  // falls back to a live client-side run for a brand-new game the ETL
+  // hasn't processed yet.
   const simulation =
-    pick && pick.predictedTotal != null && scoreSigma != null
-      ? runMonteCarlo({
-          gameId: game.id,
-          homeMean: (pick.predictedTotal + pick.adjustedPredictedMargin) / 2,
-          awayMean: (pick.predictedTotal - pick.adjustedPredictedMargin) / 2,
-          sigma: scoreSigma,
-          windMph,
-          marketHomeSpread: pick.marketHomeSpread,
-          marketTotal: pick.marketTotal,
-        })
-      : undefined;
+    pick && pick.mcMedianHomeScore != null
+      ? {
+          trials: TRIALS,
+          sigma: pick.mcSigma ?? scoreSigma ?? 0,
+          homeWinProb: pick.mcHomeWinProb as number,
+          awayWinProb: pick.mcAwayWinProb as number,
+          homeCoverProb: pick.mcHomeCoverProb ?? undefined,
+          awayCoverProb: pick.mcAwayCoverProb ?? undefined,
+          overProb: pick.mcOverProb ?? undefined,
+          underProb: pick.mcUnderProb ?? undefined,
+          medianHomeScore: pick.mcMedianHomeScore as number,
+          medianAwayScore: pick.mcMedianAwayScore as number,
+        }
+      : pick && pick.predictedTotal != null && scoreSigma != null
+        ? runMonteCarlo({
+            gameId: game.id,
+            homeMean: (pick.predictedTotal + pick.adjustedPredictedMargin) / 2,
+            awayMean: (pick.predictedTotal - pick.adjustedPredictedMargin) / 2,
+            sigma: scoreSigma,
+            windMph,
+            marketHomeSpread: pick.marketHomeSpread,
+            marketTotal: pick.marketTotal,
+          })
+        : undefined;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>

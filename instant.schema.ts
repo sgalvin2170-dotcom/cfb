@@ -137,6 +137,27 @@ const _schema = i.schema({
       mlPick: i.string().optional(),
       mlEdge: i.number().optional(),
       adjustmentNotes: i.string().optional(),
+      // Monte Carlo simulation output (lib/monteCarlo.ts), computed once by
+      // the ETL alongside the rest of this pick and frozen at the same
+      // kickoff boundary — see ensemble.ts. mcSigma records the actual
+      // (wind-adjusted) sigma used, so a later team_score_sigma retrain
+      // can't silently reinterpret an old game's simulation.
+      mcMedianHomeScore: i.number().optional(),
+      mcMedianAwayScore: i.number().optional(),
+      mcHomeWinProb: i.number().optional(),
+      mcAwayWinProb: i.number().optional(),
+      mcHomeCoverProb: i.number().optional(),
+      mcAwayCoverProb: i.number().optional(),
+      mcOverProb: i.number().optional(),
+      mcUnderProb: i.number().optional(),
+      mcSigma: i.number().optional(),
+      // This pick's 1-based rank in that week's Best Bets top-10 (lib/bestBets.ts),
+      // as of the last ensemble run before this game's own kickoff — null if it
+      // never cracked the top 10 in that market. One game can carry a rank in
+      // more than one market at once (e.g. #3 ATS and #7 Total the same week).
+      atsBestBetRank: i.number().optional(),
+      totalBestBetRank: i.number().optional(),
+      mlBestBetRank: i.number().optional(),
       computedAt: i.date().indexed(),
     }),
 

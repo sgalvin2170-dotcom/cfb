@@ -19,6 +19,8 @@ import { findBestMatch, normalize } from './teamMatch';
 import { TEAM_RANKINGS_HFA } from './sources/teamRankings';
 import { fetchPredictionTracker, type PredictionTrackerGame } from './sources/predictionTracker';
 import { blendMargin, computeMarginContributions, type MarginContribution, type SagarinHfa } from './marginModel';
+import { runMonteCarlo } from '../../lib/monteCarlo';
+import { rankBestBets, type BestBetPickInput } from '../../lib/bestBets';
 
 const MODEL_VERSION = 'v1-equal-weight'; // overridden per-pick below if v2 weights are loaded
 const V2_MODEL_VERSION = 'v2-fitted';
@@ -129,9 +131,20 @@ function confidenceTier(absEdge: number, thresholds: { high: number; medium: num
   return 'low';
 }
 
+// Same team_score_sigma trained by scripts/train/backfillScoreSigma.ts that
+// the app's client-side Monte Carlo used to read live — now read once here
+// so the simulation can be computed and frozen server-side instead.
+async function loadScoreSigma(): Promise<number | undefined> {
+  const { model_weights } = await db.query({
+    model_weights: { $: { where: { modelVersion: V2_MODEL_VERSION, sourceName: 'team_score_sigma' } } },
+  });
+  return (model_weights as any[])?.[0]?.weight;
+}
+
 export async function runEnsemble(week?: number) {
   const sagarinHfa = await fetchSagarinHfa();
   const v2Weights = await loadV2Weights();
+  const scoreSigma = await loadScoreSigma();
   const modelVersion = v2Weights ? V2_MODEL_VERSION : MODEL_VERSION;
 
   // ratings_raw keeps one row per (source, team, metric, day) forever, so an
@@ -162,6 +175,11 @@ export async function runEnsemble(week?: number) {
       awayTeam: { ratings: { $: { where: { scrapedAt: { $gte: ratingsCutoff } } } } },
       odds: {},
       weatherForecasts: {},
+      // Frozen (already-started) games don't get recomputed below, but their
+      // existing pick still needs to feed into this week's Best Bets ranking
+      // — otherwise a Thursday-night game would silently vanish from the
+      // ranking pool once Saturday's slate re-runs.
+      ensemblePicks: { $: { where: { modelVersion } } },
     },
   });
 
@@ -178,7 +196,29 @@ export async function runEnsemble(week?: number) {
   let skippedNoSources = 0;
   let frozen = 0;
 
-  const txs = (games as any[]).flatMap((game) => {
+  // Two passes: first gather every game's pick numbers — freshly computed
+  // for games that haven't started, read back from what's already frozen
+  // for games that have — then rank Best Bets per week over that combined
+  // pool (a started game's bet still belongs in this week's ranking, it
+  // just isn't the one being recomputed), and only then build the writes.
+  // A game whose kickoff has already passed gets no `pending` entry, so it
+  // produces no tx below — same "leave it frozen" behavior as before, just
+  // restructured to also let it feed the ranking.
+  interface Row {
+    game: any;
+    week: number;
+    rankFields: BestBetPickInput;
+    pending?: {
+      predictedMargin: number;
+      predictedTotal: number | undefined;
+      marketHomeSpread: number | null | undefined;
+      marketTotal: number | null | undefined;
+      update: Record<string, unknown>;
+    };
+  }
+  const rows: Row[] = [];
+
+  for (const game of games as any[]) {
     // Once a game has kicked off, freeze whatever pick was last computed —
     // Post-Game Analysis needs "what the model thought going in," not a
     // number that keeps drifting as ratings data refreshes for a game
@@ -186,7 +226,25 @@ export async function runEnsemble(week?: number) {
     // upsertOdds already freezes market lines on, for the same reason.
     if (new Date(game.startDate) <= nowDate) {
       frozen++;
-      return [];
+      const existing = game.ensemblePicks?.[0];
+      if (existing) {
+        rows.push({
+          game,
+          week: game.week,
+          rankFields: {
+            gameId: game.id,
+            atsPick: existing.atsPick,
+            marketHomeSpread: existing.marketHomeSpread,
+            adjustedPredictedMargin: existing.adjustedPredictedMargin,
+            totalPick: existing.totalPick,
+            marketTotal: existing.marketTotal,
+            predictedTotal: existing.predictedTotal,
+            mlPick: existing.mlPick,
+            mlEdge: existing.mlEdge,
+          },
+        });
+      }
+      continue;
     }
 
     const { contributions, predictedTotal } = computeMarginContributions(
@@ -206,7 +264,7 @@ export async function runEnsemble(week?: number) {
 
     if (contributions.length === 0) {
       skippedNoSources++;
-      return [];
+      continue;
     }
 
     const predictedMargin = blendMargin(contributions, v2Weights?.weights, v2Weights?.intercept)!;
@@ -263,9 +321,26 @@ export async function runEnsemble(week?: number) {
     }
 
     computed++;
-    return [
-      db.tx.ensemble_picks.lookup('pickKey', `${modelVersion}:${game.cfbdGameId}`)
-        .update({
+    rows.push({
+      game,
+      week: game.week,
+      rankFields: {
+        gameId: game.id,
+        atsPick,
+        marketHomeSpread: odds?.homeSpread,
+        adjustedPredictedMargin: predictedMargin,
+        totalPick,
+        marketTotal: odds?.overUnder,
+        predictedTotal,
+        mlPick,
+        mlEdge,
+      },
+      pending: {
+        predictedMargin,
+        predictedTotal,
+        marketHomeSpread: odds?.homeSpread,
+        marketTotal: odds?.overUnder,
+        update: {
           modelVersion,
           rawPredictedMargin: predictedMargin,
           adjustedPredictedMargin: predictedMargin,
@@ -291,11 +366,64 @@ export async function runEnsemble(week?: number) {
           adjustmentNotes: `blend of ${contributions.length} margin source(s) (${v2Weights ? 'fitted weights' : 'equal weight'}): ${contributions
             .map((c: MarginContribution) => c.source)
             .join(', ')}${predictedTotal != null ? '; total from fei' : ''}${windNote ? `; ${windNote}` : ''}`,
+        },
+      },
+    });
+  }
+
+  // Best Bets ranks within a week (matching the Best Bets screen's own
+  // per-week top-10 scope) — computed over every game's pick in that week,
+  // frozen or not, but only written onto the games actually being written
+  // below (a frozen game's own rank stays whatever was last computed the
+  // run before its kickoff).
+  const rowsByWeek = new Map<number, Row[]>();
+  for (const row of rows) {
+    const list = rowsByWeek.get(row.week) ?? [];
+    list.push(row);
+    rowsByWeek.set(row.week, list);
+  }
+  const rankByKey = new Map<string, number>();
+  for (const weekRows of rowsByWeek.values()) {
+    for (const [key, rank] of rankBestBets(weekRows.map((r) => r.rankFields))) {
+      rankByKey.set(key, rank);
+    }
+  }
+
+  const txs = rows
+    .filter((r): r is Row & { pending: NonNullable<Row['pending']> } => r.pending != null)
+    .map(({ game, pending }) => {
+      const mc =
+        pending.predictedTotal != null && scoreSigma != null
+          ? runMonteCarlo({
+              gameId: game.id,
+              homeMean: (pending.predictedTotal + pending.predictedMargin) / 2,
+              awayMean: (pending.predictedTotal - pending.predictedMargin) / 2,
+              sigma: scoreSigma,
+              windMph: game.weatherForecasts?.[0]?.windMph,
+              marketHomeSpread: pending.marketHomeSpread ?? undefined,
+              marketTotal: pending.marketTotal ?? undefined,
+            })
+          : undefined;
+
+      return db.tx.ensemble_picks.lookup('pickKey', `${modelVersion}:${game.cfbdGameId}`)
+        .update({
+          ...pending.update,
+          mcMedianHomeScore: mc?.medianHomeScore ?? null,
+          mcMedianAwayScore: mc?.medianAwayScore ?? null,
+          mcHomeWinProb: mc?.homeWinProb ?? null,
+          mcAwayWinProb: mc?.awayWinProb ?? null,
+          mcHomeCoverProb: mc?.homeCoverProb ?? null,
+          mcAwayCoverProb: mc?.awayCoverProb ?? null,
+          mcOverProb: mc?.overProb ?? null,
+          mcUnderProb: mc?.underProb ?? null,
+          mcSigma: mc?.sigma ?? null,
+          atsBestBetRank: rankByKey.get(`${game.id}:ATS`) ?? null,
+          totalBestBetRank: rankByKey.get(`${game.id}:Total`) ?? null,
+          mlBestBetRank: rankByKey.get(`${game.id}:ML`) ?? null,
           computedAt: now,
         })
-        .link({ game: lookup('cfbdGameId', game.cfbdGameId) }),
-    ];
-  });
+        .link({ game: lookup('cfbdGameId', game.cfbdGameId) });
+    });
 
   await transactInChunks(txs);
   console.log(

@@ -8,7 +8,7 @@
 // Seeded off the game id so the same game always shows the same simulated
 // percentages on reload instead of jittering a point or two each visit.
 
-const TRIALS = 10000;
+export const TRIALS = 10000;
 
 // Reuses the existing 15/20mph total-confidence-downgrade thresholds
 // (scripts/etl/ensemble.ts) as a variance-shrink multiplier instead of a

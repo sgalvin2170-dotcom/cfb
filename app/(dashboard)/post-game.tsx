@@ -6,6 +6,7 @@ import WeekSelector from '../../components/WeekSelector';
 import { db } from '../../lib/db';
 import { formatKickoff, formatSpread, formatTotal } from '../../lib/format';
 import { gradeAts, gradeTotal, gradeColor, type Grade } from '../../lib/grading';
+import { aggregateBoxScore, type BoxScoreAgg } from '../../lib/boxScoreAgg';
 
 const CURRENT_SEASON = Number(process.env.EXPO_PUBLIC_CFB_SEASON ?? new Date().getFullYear());
 
@@ -15,11 +16,12 @@ export default function PostGameAnalysisScreen() {
   const { isLoading, error, data } = db.useQuery({
     games: {
       $: { where: { season: CURRENT_SEASON, completed: true }, order: { startDate: 'desc' } },
-      homeTeam: {},
-      awayTeam: {},
+      homeTeam: { gameStats: {} },
+      awayTeam: { gameStats: {} },
       odds: {},
       ensemblePicks: { $: { order: { computedAt: 'desc' } } },
       teamStats: { team: {} },
+      weatherForecasts: {},
     },
   });
 
@@ -64,6 +66,8 @@ function PostGameCard({ game }: { game: any }) {
   const odds = game.odds?.[0];
   const homeStats = (game.teamStats ?? []).find((s: any) => s.team?.id === game.homeTeam?.id);
   const awayStats = (game.teamStats ?? []).find((s: any) => s.team?.id === game.awayTeam?.id);
+  const homeYtd = useMemo(() => aggregateBoxScore(game.homeTeam?.gameStats ?? []), [game.homeTeam?.gameStats]);
+  const awayYtd = useMemo(() => aggregateBoxScore(game.awayTeam?.gameStats ?? []), [game.awayTeam?.gameStats]);
 
   const showAts = pick?.atsConfidence === 'high' || pick?.atsConfidence === 'medium';
   const showTotal = pick?.totalConfidence === 'high' || pick?.totalConfidence === 'medium';
@@ -97,6 +101,7 @@ function PostGameCard({ game }: { game: any }) {
           market={formatSpread(odds?.homeSpread)}
           actual={formatSpread(actualSpread)}
           grade={atsGrade}
+          bestBetRank={pick.atsBestBetRank}
         />
       ) : null}
 
@@ -109,10 +114,20 @@ function PostGameCard({ game }: { game: any }) {
           market={formatTotal(odds?.overUnder)}
           actual={formatTotal(actualTotal)}
           grade={totalGrade}
+          bestBetRank={pick.totalBestBetRank}
         />
       ) : null}
 
-      <BoxScoreTable awayLabel={game.awayTeam?.school ?? 'Away'} homeLabel={game.homeTeam?.school ?? 'Home'} awayStats={awayStats} homeStats={homeStats} />
+      <MonteCarloRow game={game} pick={pick} />
+
+      <BoxScoreTable
+        awayLabel={game.awayTeam?.school ?? 'Away'}
+        homeLabel={game.homeTeam?.school ?? 'Home'}
+        awayStats={awayStats}
+        homeStats={homeStats}
+        awayYtd={awayYtd}
+        homeYtd={homeYtd}
+      />
     </View>
   );
 }
@@ -129,6 +144,7 @@ function SelectionRow({
   market,
   actual,
   grade,
+  bestBetRank,
 }: {
   label: string;
   confidence: string | undefined;
@@ -137,6 +153,7 @@ function SelectionRow({
   market: string;
   actual: string;
   grade: Grade | undefined;
+  bestBetRank: number | null | undefined;
 }) {
   const highlight = confidence === 'high' ? styles.highlightHigh : confidence === 'medium' ? styles.highlightMedium : null;
   return (
@@ -152,6 +169,34 @@ function SelectionRow({
         <NumberCell label="Market" value={market} />
         <NumberCell label="Actual" value={actual} />
       </View>
+      {bestBetRank != null ? <Text style={styles.bestBetBadge}>★ Best Bet #{bestBetRank} that week</Text> : null}
+    </View>
+  );
+}
+
+// Straight-up (not ATS): whichever team the simulation gave >50% win
+// probability to going in is its "pick," graded against who actually won.
+// Reads the simulation the ETL already ran and froze at kickoff (see
+// scripts/etl/ensemble.ts and lib/monteCarlo.ts) rather than recomputing it
+// here — this screen needs "what the model thought going in," and only a
+// value actually stored at that moment can guarantee that, since sigma or
+// weather data could otherwise drift after the fact.
+function MonteCarloRow({ game, pick }: { game: any; pick: any }) {
+  if (!pick || pick.mcMedianHomeScore == null || pick.mcHomeWinProb == null) return null;
+
+  const predictedHomeWin = pick.mcHomeWinProb > 0.5;
+  const actualHomeWin = game.homePoints != null && game.awayPoints != null ? game.homePoints > game.awayPoints : undefined;
+  const grade: Grade | undefined = actualHomeWin == null ? undefined : predictedHomeWin === actualHomeWin ? 'win' : 'loss';
+
+  return (
+    <View style={styles.selectionBlock}>
+      <View style={styles.selectionHeader}>
+        <Text style={styles.selectionLabel}>Monte Carlo</Text>
+        <Text style={[styles.gradeText, { color: gradeColor(grade) }]}>{grade ? grade.toUpperCase() : '—'}</Text>
+      </View>
+      <Text style={styles.mcExpected}>
+        Expected: {game.awayTeam?.school ?? 'Away'} {pick.mcMedianAwayScore} – {game.homeTeam?.school ?? 'Home'} {pick.mcMedianHomeScore}
+      </Text>
     </View>
   );
 }
@@ -170,53 +215,70 @@ function BoxScoreTable({
   homeLabel,
   awayStats,
   homeStats,
+  awayYtd,
+  homeYtd,
 }: {
   awayLabel: string;
   homeLabel: string;
   awayStats: any;
   homeStats: any;
+  awayYtd: BoxScoreAgg;
+  homeYtd: BoxScoreAgg;
 }) {
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.boxScoreScroll}>
-      <View style={styles.boxScore}>
-        <View style={styles.boxScoreRow}>
-          <Text style={styles.boxScoreRowLabel} />
-          <Text style={styles.boxScoreHeaderCell}>Rush</Text>
-          <Text style={styles.boxScoreHeaderCell}>Pass</Text>
-          <Text style={styles.boxScoreHeaderCell}>TO</Text>
-          <Text style={styles.boxScoreHeaderCell}>Poss</Text>
-          <Text style={styles.boxScoreHeaderCell}>3rd Dn</Text>
-          <Text style={styles.boxScoreHeaderCell}>Rush TD</Text>
-          <Text style={styles.boxScoreHeaderCell}>Pass TD</Text>
-          <Text style={styles.boxScoreHeaderCell}>FG</Text>
-          <Text style={styles.boxScoreHeaderCell}>Drives</Text>
-          <Text style={styles.boxScoreHeaderCell}>1st Dn</Text>
-          <Text style={styles.boxScoreHeaderCell}>Pen</Text>
+    <View>
+      <Text style={styles.boxScoreLegend}>Game · Season-to-date</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.boxScoreScroll}>
+        <View style={styles.boxScore}>
+          <View style={styles.boxScoreRow}>
+            <Text style={styles.boxScoreRowLabel} />
+            <Text style={styles.boxScoreHeaderCell}>Rush</Text>
+            <Text style={styles.boxScoreHeaderCell}>Pass</Text>
+            <Text style={styles.boxScoreHeaderCell}>TO</Text>
+            <Text style={styles.boxScoreHeaderCell}>Rush TD</Text>
+            <Text style={styles.boxScoreHeaderCell}>Pass TD</Text>
+            <Text style={styles.boxScoreHeaderCell}>FG</Text>
+            <Text style={styles.boxScoreHeaderCell}>Drives</Text>
+            <Text style={styles.boxScoreHeaderCell}>Poss</Text>
+            <Text style={styles.boxScoreHeaderCell}>1st Dn</Text>
+            <Text style={styles.boxScoreHeaderCell}>3rd Dn</Text>
+            <Text style={styles.boxScoreHeaderCell}>Pen</Text>
+          </View>
+          <BoxScoreRow label={awayLabel} stats={awayStats} ytd={awayYtd} />
+          <BoxScoreRow label={homeLabel} stats={homeStats} ytd={homeYtd} />
         </View>
-        <BoxScoreRow label={awayLabel} stats={awayStats} />
-        <BoxScoreRow label={homeLabel} stats={homeStats} />
-      </View>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
-function BoxScoreRow({ label, stats }: { label: string; stats: any }) {
+function BoxScoreRow({ label, stats, ytd }: { label: string; stats: any; ytd: BoxScoreAgg }) {
   return (
     <View style={styles.boxScoreRow}>
       <Text style={styles.boxScoreRowLabel} numberOfLines={1}>
         {label}
       </Text>
-      <Text style={styles.boxScoreCell}>{stats?.rushingYards ?? '—'}</Text>
-      <Text style={styles.boxScoreCell}>{stats?.passingYards ?? '—'}</Text>
-      <Text style={styles.boxScoreCell}>{stats?.turnovers ?? '—'}</Text>
-      <Text style={styles.boxScoreCell}>{stats?.possessionTime ?? '—'}</Text>
-      <Text style={styles.boxScoreCell}>{stats?.thirdDownConv ?? '—'}</Text>
-      <Text style={styles.boxScoreCell}>{stats?.rushingTDs ?? '—'}</Text>
-      <Text style={styles.boxScoreCell}>{stats?.passingTDs ?? '—'}</Text>
-      <Text style={styles.boxScoreCell}>{stats?.fieldGoals ?? '—'}</Text>
-      <Text style={styles.boxScoreCell}>{stats?.drives ?? '—'}</Text>
-      <Text style={styles.boxScoreCell}>{stats?.firstDowns ?? '—'}</Text>
-      <Text style={styles.boxScoreCell}>{stats?.penalties ?? '—'}</Text>
+      <StatCell value={stats?.rushingYards} ytd={ytd.rushingYards} />
+      <StatCell value={stats?.passingYards} ytd={ytd.passingYards} />
+      <StatCell value={stats?.turnovers} ytd={ytd.turnovers} />
+      <StatCell value={stats?.rushingTDs} ytd={ytd.rushingTDs} />
+      <StatCell value={stats?.passingTDs} ytd={ytd.passingTDs} />
+      <StatCell value={stats?.fieldGoals} ytd={ytd.fieldGoals} />
+      <StatCell value={stats?.drives} ytd={ytd.drives} />
+      <StatCell value={stats?.possessionTime} ytd={ytd.possessionTime} />
+      <StatCell value={stats?.firstDowns} ytd={ytd.firstDowns} />
+      <StatCell value={stats?.thirdDownConv} ytd={ytd.thirdDownConv} />
+      <StatCell value={stats?.penalties} ytd={ytd.penalties} />
+    </View>
+  );
+}
+
+function StatCell({ value, ytd }: { value: string | number | undefined | null; ytd: string | number | undefined }) {
+  return (
+    <View style={styles.statCell}>
+      <Text style={styles.statCellValue}>{value ?? '—'}</Text>
+      <View style={styles.statCellDivider} />
+      <Text style={styles.statCellYtd}>{ytd ?? '—'}</Text>
     </View>
   );
 }
@@ -319,10 +381,27 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#0b1d3a',
   },
+  mcExpected: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#0b1d3a',
+  },
+  bestBetBadge: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#9a6700',
+    marginTop: 2,
+  },
+  boxScoreLegend: {
+    fontSize: 10,
+    color: '#8b949e',
+    marginTop: 6,
+    marginBottom: 2,
+  },
   boxScoreScroll: {
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: '#d0d7de',
-    paddingTop: 6,
+    paddingTop: 4,
   },
   boxScore: {
     gap: 4,
@@ -342,14 +421,29 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
     color: '#8b949e',
-    width: 46,
-    textAlign: 'right',
+    width: 68,
+    textAlign: 'center',
   },
-  boxScoreCell: {
+  statCell: {
+    width: 68,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  statCellValue: {
     fontSize: 12,
     fontWeight: '600',
     color: '#57606a',
-    width: 46,
-    textAlign: 'right',
+  },
+  statCellDivider: {
+    width: 1,
+    height: 12,
+    backgroundColor: '#d0d7de',
+  },
+  statCellYtd: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: '#8b949e',
   },
 });

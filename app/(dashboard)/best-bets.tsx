@@ -7,14 +7,7 @@ import WeekSelector from '../../components/WeekSelector';
 import { confidenceColor, formatKickoff, formatSpread } from '../../lib/format';
 import { useSeasonGames } from '../../lib/useSeasonGames';
 import type { GameView } from '../../lib/types';
-
-// Mirrors the confidence-tier point/probability thresholds in
-// scripts/etl/ensemble.ts. Dividing each bet's edge by its own market's
-// "high confidence" cutoff puts point-based (ATS/Total) and probability-based
-// (ML) edges on one comparable 0-and-up scale for ranking across markets.
-const ATS_HIGH_PTS = 3;
-const TOTAL_HIGH_PTS = 6;
-const ML_HIGH_EDGE = 0.1;
+import { atsEdge, atsStrength, mlStrength, totalEdge, totalStrength } from '../../lib/bestBets';
 
 interface BestBet {
   key: string;
@@ -42,7 +35,7 @@ function buildBets(games: GameView[]): BestBet[] {
     const matchup = matchupLabel(game);
 
     if (pick.atsPick && pick.marketHomeSpread != null && pick.adjustedPredictedMargin != null) {
-      const edge = pick.adjustedPredictedMargin + pick.marketHomeSpread;
+      const edge = atsEdge(pick.adjustedPredictedMargin, pick.marketHomeSpread);
       const team = pick.atsPick === 'home' ? game.homeTeam : game.awayTeam;
       const line = pick.atsPick === 'home' ? pick.marketHomeSpread : -pick.marketHomeSpread;
       bets.push({
@@ -51,7 +44,7 @@ function buildBets(games: GameView[]): BestBet[] {
         market: 'ATS',
         pickLabel: `${team?.school ?? pick.atsPick.toUpperCase()} ${formatSpread(line)}`,
         confidence: pick.atsConfidence,
-        strength: Math.abs(edge) / ATS_HIGH_PTS,
+        strength: atsStrength(edge),
         edgeText: `${Math.abs(edge).toFixed(1)} pt edge`,
         reason: `${matchup}: model margin ${formatSpread(pick.adjustedPredictedMargin)} (home) vs market ${formatSpread(
           pick.marketHomeSpread,
@@ -60,14 +53,14 @@ function buildBets(games: GameView[]): BestBet[] {
     }
 
     if (pick.totalPick && pick.marketTotal != null && pick.predictedTotal != null) {
-      const edge = pick.predictedTotal - pick.marketTotal;
+      const edge = totalEdge(pick.predictedTotal, pick.marketTotal);
       bets.push({
         key: `${game.id}-total`,
         game,
         market: 'Total',
         pickLabel: `${pick.totalPick === 'over' ? 'Over' : 'Under'} ${pick.marketTotal.toFixed(1)}`,
         confidence: pick.totalConfidence,
-        strength: Math.abs(edge) / TOTAL_HIGH_PTS,
+        strength: totalStrength(edge),
         edgeText: `${Math.abs(edge).toFixed(1)} pt edge`,
         reason: `${matchup}: model total ${pick.predictedTotal.toFixed(1)} vs market ${pick.marketTotal.toFixed(1)}. ${
           pick.adjustmentNotes ?? ''
@@ -83,8 +76,8 @@ function buildBets(games: GameView[]): BestBet[] {
         game,
         market: 'ML',
         pickLabel: `${team?.school ?? pick.mlPick.toUpperCase()} ML`,
-        confidence: Math.abs(pick.mlEdge) >= ML_HIGH_EDGE ? 'high' : 'medium',
-        strength: Math.abs(pick.mlEdge) / ML_HIGH_EDGE,
+        confidence: mlStrength(pick.mlEdge) >= 1 ? 'high' : 'medium',
+        strength: mlStrength(pick.mlEdge),
         edgeText: `${edgePct.toFixed(1)}% win-prob edge`,
         reason: `${matchup}: model gives ${team?.school ?? pick.mlPick} a ${edgePct.toFixed(
           1,
