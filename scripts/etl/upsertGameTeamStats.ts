@@ -34,6 +34,15 @@ function statNumber(stats: CfbdGameTeamStat[], category: string): number | undef
   return Number.isNaN(n) ? undefined : n;
 }
 
+// `completionAttempts` is CFBD's "completions-attempts" string (e.g.
+// "29-40") — attempts is the second number.
+function attemptsFromCompletionAttempts(stats: CfbdGameTeamStat[]): number | undefined {
+  const raw = statValue(stats, 'completionAttempts');
+  if (raw == null) return undefined;
+  const [, attempts] = raw.split('-').map(Number);
+  return Number.isNaN(attempts) ? undefined : attempts;
+}
+
 // Sums "made/attempted" fractions across however many kickers a team used
 // (almost always exactly one) — e.g. two entries "1/1" + "1/2" -> "2/3".
 function sumFractions(fractions: string[]): string | undefined {
@@ -49,18 +58,26 @@ function sumFractions(fractions: string[]): string | undefined {
   return `${made}/${attempted}`;
 }
 
-async function buildDriveCounts(week: number): Promise<Map<string, number>> {
-  const counts = new Map<string, number>();
+interface DriveStats {
+  drives: number;
+  plays: number;
+}
+
+async function buildDriveStats(week: number): Promise<Map<string, DriveStats>> {
+  const stats = new Map<string, DriveStats>();
   try {
     const drives = await fetchDrives(week);
     for (const d of drives) {
       const key = `${d.gameId}:${d.offense}`;
-      counts.set(key, (counts.get(key) ?? 0) + 1);
+      const existing = stats.get(key) ?? { drives: 0, plays: 0 };
+      existing.drives += 1;
+      existing.plays += d.plays ?? 0;
+      stats.set(key, existing);
     }
   } catch (err) {
     console.warn(`[game-team-stats] could not fetch drives for week ${week}:`, err);
   }
-  return counts;
+  return stats;
 }
 
 async function buildFieldGoals(week: number): Promise<Map<string, string>> {
@@ -109,7 +126,7 @@ async function upsertGameTeamStats() {
       continue;
     }
 
-    const [driveCounts, fieldGoals] = await Promise.all([buildDriveCounts(week), buildFieldGoals(week)]);
+    const [driveStats, fieldGoals] = await Promise.all([buildDriveStats(week), buildFieldGoals(week)]);
 
     for (const game of weekGames) {
       // /games/teams returns every game that week, including ones we never
@@ -128,6 +145,8 @@ async function upsertGameTeamStats() {
             .update({
               rushingYards: statNumber(teamEntry.stats, 'rushingYards') ?? null,
               passingYards: statNumber(teamEntry.stats, 'netPassingYards') ?? null,
+              rushingAttempts: statNumber(teamEntry.stats, 'rushingAttempts') ?? null,
+              passingAttempts: attemptsFromCompletionAttempts(teamEntry.stats) ?? null,
               turnovers: statNumber(teamEntry.stats, 'turnovers') ?? null,
               possessionTime: statValue(teamEntry.stats, 'possessionTime') ?? null,
               thirdDownConv: statValue(teamEntry.stats, 'thirdDownEff') ?? null,
@@ -135,7 +154,8 @@ async function upsertGameTeamStats() {
               passingTDs: statNumber(teamEntry.stats, 'passingTDs') ?? null,
               firstDowns: statNumber(teamEntry.stats, 'firstDowns') ?? null,
               penalties: statValue(teamEntry.stats, 'totalPenaltiesYards') ?? null,
-              drives: driveCounts.get(`${game.id}:${teamEntry.team}`) ?? null,
+              drives: driveStats.get(`${game.id}:${teamEntry.team}`)?.drives ?? null,
+              numberOfPlays: driveStats.get(`${game.id}:${teamEntry.team}`)?.plays ?? null,
               fieldGoals: fieldGoals.get(`${game.id}:${teamEntry.team}`) ?? null,
               computedAt: now,
             })

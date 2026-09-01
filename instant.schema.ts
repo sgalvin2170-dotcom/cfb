@@ -276,7 +276,11 @@ const _schema = i.schema({
     // raw "MM:SS"/"7-12"/"2-25" strings. `fieldGoals` ("2/3") and `drives` come from
     // two additional endpoints (/games/players, /drives) that /games/teams
     // doesn't cover — see upsertGameTeamStats.ts for why those are gated
-    // more carefully than the rest of this table.
+    // more carefully than the rest of this table. `numberOfPlays` is summed
+    // from /drives' own per-drive `plays` field, the same fetch `drives`
+    // already uses — no extra endpoint needed. `rushingAttempts` is its own
+    // /games/teams category; `passingAttempts` is the second number of that
+    // same endpoint's "completions-attempts" `completionAttempts` string.
     game_team_stats: i.entity({
       // "{cfbdGameId}:{teamId}" — idempotent upsert key; a completed game's
       // box score never changes, so re-fetching just overwrites with the
@@ -284,6 +288,8 @@ const _schema = i.schema({
       statsKey: i.string().unique().indexed(),
       rushingYards: i.number().optional(),
       passingYards: i.number().optional(),
+      rushingAttempts: i.number().optional(),
+      passingAttempts: i.number().optional(),
       turnovers: i.number().optional(),
       possessionTime: i.string().optional(),
       thirdDownConv: i.string().optional(),
@@ -291,6 +297,7 @@ const _schema = i.schema({
       passingTDs: i.number().optional(),
       fieldGoals: i.string().optional(),
       drives: i.number().optional(),
+      numberOfPlays: i.number().optional(),
       firstDowns: i.number().optional(),
       penalties: i.string().optional(),
       computedAt: i.date().indexed(),

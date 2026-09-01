@@ -234,15 +234,18 @@ function BoxScoreTable({
             <Text style={styles.boxScoreRowLabel} />
             <Text style={styles.boxScoreHeaderCell}>Rush</Text>
             <Text style={styles.boxScoreHeaderCell}>Pass</Text>
-            <Text style={styles.boxScoreHeaderCell}>TO</Text>
+            <Text style={styles.boxScoreHeaderCell}>Rush Plays</Text>
+            <Text style={styles.boxScoreHeaderCell}>Pass Plays</Text>
             <Text style={styles.boxScoreHeaderCell}>Rush TD</Text>
             <Text style={styles.boxScoreHeaderCell}>Pass TD</Text>
             <Text style={styles.boxScoreHeaderCell}>FG</Text>
             <Text style={styles.boxScoreHeaderCell}>Drives</Text>
+            <Text style={styles.boxScoreHeaderCell}>Plays</Text>
             <Text style={styles.boxScoreHeaderCell}>Poss</Text>
             <Text style={styles.boxScoreHeaderCell}>1st Dn</Text>
             <Text style={styles.boxScoreHeaderCell}>3rd Dn</Text>
             <Text style={styles.boxScoreHeaderCell}>Pen</Text>
+            <Text style={styles.boxScoreHeaderCell}>TO</Text>
           </View>
           <BoxScoreRow label={awayLabel} stats={awayStats} ytd={awayYtd} />
           <BoxScoreRow label={homeLabel} stats={homeStats} ytd={homeYtd} />
@@ -260,15 +263,18 @@ function BoxScoreRow({ label, stats, ytd }: { label: string; stats: any; ytd: Bo
       </Text>
       <StatCell value={stats?.rushingYards} ytd={ytd.rushingYards} />
       <StatCell value={stats?.passingYards} ytd={ytd.passingYards} />
-      <StatCell value={stats?.turnovers} ytd={ytd.turnovers} />
+      <StatCell value={stats?.rushingAttempts} ytd={ytd.rushingAttempts} />
+      <StatCell value={stats?.passingAttempts} ytd={ytd.passingAttempts} />
       <StatCell value={stats?.rushingTDs} ytd={ytd.rushingTDs} />
       <StatCell value={stats?.passingTDs} ytd={ytd.passingTDs} />
       <StatCell value={stats?.fieldGoals} ytd={ytd.fieldGoals} />
       <StatCell value={stats?.drives} ytd={ytd.drives} />
+      <StatCell value={stats?.numberOfPlays} ytd={ytd.numberOfPlays} />
       <StatCell value={stats?.possessionTime} ytd={ytd.possessionTime} />
       <StatCell value={stats?.firstDowns} ytd={ytd.firstDowns} />
       <StatCell value={stats?.thirdDownConv} ytd={ytd.thirdDownConv} />
       <StatCell value={stats?.penalties} ytd={ytd.penalties} />
+      <StatCell value={stats?.turnovers} ytd={ytd.turnovers} />
     </View>
   );
 }

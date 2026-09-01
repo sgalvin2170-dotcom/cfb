@@ -6,11 +6,14 @@
 export interface BoxScoreRow {
   rushingYards?: number | null;
   passingYards?: number | null;
+  rushingAttempts?: number | null;
+  passingAttempts?: number | null;
   turnovers?: number | null;
   rushingTDs?: number | null;
   passingTDs?: number | null;
   fieldGoals?: string | null;
   drives?: number | null;
+  numberOfPlays?: number | null;
   possessionTime?: string | null;
   firstDowns?: number | null;
   thirdDownConv?: string | null;
@@ -20,11 +23,14 @@ export interface BoxScoreRow {
 export interface BoxScoreAgg {
   rushingYards?: number;
   passingYards?: number;
+  rushingAttempts?: number;
+  passingAttempts?: number;
   turnovers?: number;
   rushingTDs?: number;
   passingTDs?: number;
   fieldGoals?: string;
   drives?: number;
+  numberOfPlays?: number;
   possessionTime?: string;
   firstDowns?: number;
   thirdDownConv?: string;
@@ -93,11 +99,14 @@ export function aggregateBoxScore(rows: BoxScoreRow[]): BoxScoreAgg {
   return {
     rushingYards: sumNumbers(rows.map((r) => r.rushingYards)),
     passingYards: sumNumbers(rows.map((r) => r.passingYards)),
+    rushingAttempts: sumNumbers(rows.map((r) => r.rushingAttempts)),
+    passingAttempts: sumNumbers(rows.map((r) => r.passingAttempts)),
     turnovers: sumNumbers(rows.map((r) => r.turnovers)),
     rushingTDs: sumNumbers(rows.map((r) => r.rushingTDs)),
     passingTDs: sumNumbers(rows.map((r) => r.passingTDs)),
     fieldGoals: sumFractionFormat(rows.map((r) => r.fieldGoals)),
     drives: sumNumbers(rows.map((r) => r.drives)),
+    numberOfPlays: sumNumbers(rows.map((r) => r.numberOfPlays)),
     possessionTime: avgPossession(rows.map((r) => r.possessionTime)),
     firstDowns: sumNumbers(rows.map((r) => r.firstDowns)),
     thirdDownConv: sumDashFormat(rows.map((r) => r.thirdDownConv)),

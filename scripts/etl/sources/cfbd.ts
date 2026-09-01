@@ -261,6 +261,7 @@ export function fetchGameTeamStats(week: number, year: number = env.season): Pro
 export interface CfbdDrive {
   gameId: number;
   offense: string;
+  plays: number;
 }
 
 // One call covers a whole week (confirmed live: 762 drives for a ~50-game
