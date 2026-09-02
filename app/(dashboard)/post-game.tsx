@@ -10,6 +10,42 @@ import { aggregateBoxScore, type BoxScoreAgg } from '../../lib/boxScoreAgg';
 
 const CURRENT_SEASON = Number(process.env.EXPO_PUBLIC_CFB_SEASON ?? new Date().getFullYear());
 
+interface BestBetTally {
+  wins: number;
+  losses: number;
+  pushes: number;
+}
+
+// Season-to-date, not scoped to the visible week — a Best Bets win/loss
+// record only means something as a running total. Grades the same
+// ATS/Total selections SelectionRow already grades below, just gated on
+// whether that specific selection carried a frozen Best Bets rank for its
+// week (see scripts/etl/ensemble.ts) rather than every high/medium pick.
+function tallyBestBets(games: any[]): BestBetTally {
+  let wins = 0;
+  let losses = 0;
+  let pushes = 0;
+  for (const g of games) {
+    const pick = g.ensemblePicks?.[0];
+    if (!pick) continue;
+    const odds = g.odds?.[0];
+
+    if (pick.atsBestBetRank != null) {
+      const grade = gradeAts(pick.atsPick, g.homePoints, g.awayPoints, odds?.homeSpread);
+      if (grade === 'win') wins++;
+      else if (grade === 'loss') losses++;
+      else if (grade === 'push') pushes++;
+    }
+    if (pick.totalBestBetRank != null) {
+      const grade = gradeTotal(pick.totalPick, g.homePoints, g.awayPoints, odds?.overUnder);
+      if (grade === 'win') wins++;
+      else if (grade === 'loss') losses++;
+      else if (grade === 'push') pushes++;
+    }
+  }
+  return { wins, losses, pushes };
+}
+
 export default function PostGameAnalysisScreen() {
   const [selectedWeek, setSelectedWeek] = useState<number | undefined>(undefined);
 
@@ -29,10 +65,12 @@ export default function PostGameAnalysisScreen() {
   const weeks = useMemo(() => Array.from(new Set(games.map((g) => g.week))).sort((a, b) => a - b), [games]);
   const effectiveWeek = selectedWeek ?? weeks[weeks.length - 1];
   const visibleGames = useMemo(() => games.filter((g) => g.week === effectiveWeek), [games, effectiveWeek]);
+  const bestBetsTally = useMemo(() => tallyBestBets(games), [games]);
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <WeekSelector weeks={weeks} selectedWeek={effectiveWeek} onSelect={setSelectedWeek} />
+      <BestBetsRecordBanner tally={bestBetsTally} />
 
       {isLoading ? (
         <ActivityIndicator style={styles.centerFill} size="large" />
@@ -52,6 +90,23 @@ export default function PostGameAnalysisScreen() {
         </ScrollView>
       )}
     </SafeAreaView>
+  );
+}
+
+function BestBetsRecordBanner({ tally }: { tally: BestBetTally }) {
+  const decided = tally.wins + tally.losses;
+  if (decided === 0 && tally.pushes === 0) return null;
+  const pct = decided > 0 ? ((tally.wins / decided) * 100).toFixed(1) : null;
+
+  return (
+    <View style={styles.bestBetsBanner}>
+      <Text style={styles.bestBetsBannerLabel}>Best Bets record (season)</Text>
+      <Text style={styles.bestBetsBannerValue}>
+        {tally.wins}-{tally.losses}
+        {tally.pushes > 0 ? `-${tally.pushes}` : ''}
+        {pct != null ? ` (${pct}%)` : ''}
+      </Text>
+    </View>
   );
 }
 
@@ -293,6 +348,26 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f6f8fa',
+  },
+  bestBetsBanner: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#fff8ec',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#d0d7de',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  bestBetsBannerLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#57606a',
+  },
+  bestBetsBannerValue: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#9a6700',
   },
   centerFill: {
     flex: 1,
