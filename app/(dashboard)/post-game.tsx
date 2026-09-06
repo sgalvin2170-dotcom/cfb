@@ -46,6 +46,50 @@ function tallyBestBets(games: any[]): BestBetTally {
   return { wins, losses, pushes };
 }
 
+// Same idea as tallyBestBets, but gated on confidence tier instead of Best
+// Bets rank — every ATS/Total selection at that tier, not just the ones
+// that also cracked that week's top 10.
+function tallyByConfidence(games: any[], level: 'high' | 'medium'): BestBetTally {
+  let wins = 0;
+  let losses = 0;
+  let pushes = 0;
+  for (const g of games) {
+    const pick = g.ensemblePicks?.[0];
+    if (!pick) continue;
+    const odds = g.odds?.[0];
+
+    if (pick.atsConfidence === level) {
+      const grade = gradeAts(pick.atsPick, g.homePoints, g.awayPoints, odds?.homeSpread);
+      if (grade === 'win') wins++;
+      else if (grade === 'loss') losses++;
+      else if (grade === 'push') pushes++;
+    }
+    if (pick.totalConfidence === level) {
+      const grade = gradeTotal(pick.totalPick, g.homePoints, g.awayPoints, odds?.overUnder);
+      if (grade === 'win') wins++;
+      else if (grade === 'loss') losses++;
+      else if (grade === 'push') pushes++;
+    }
+  }
+  return { wins, losses, pushes };
+}
+
+// Same straight-up win/loss grade MonteCarloRow computes per game, tallied
+// across the season. No push case — CFB games don't end in ties.
+function tallyMonteCarlo(games: any[]): BestBetTally {
+  let wins = 0;
+  let losses = 0;
+  for (const g of games) {
+    const pick = g.ensemblePicks?.[0];
+    if (!pick || pick.mcHomeWinProb == null || g.homePoints == null || g.awayPoints == null) continue;
+    const predictedHomeWin = pick.mcHomeWinProb > 0.5;
+    const actualHomeWin = g.homePoints > g.awayPoints;
+    if (predictedHomeWin === actualHomeWin) wins++;
+    else losses++;
+  }
+  return { wins, losses, pushes: 0 };
+}
+
 export default function PostGameAnalysisScreen() {
   const [selectedWeek, setSelectedWeek] = useState<number | undefined>(undefined);
 
@@ -66,11 +110,19 @@ export default function PostGameAnalysisScreen() {
   const effectiveWeek = selectedWeek ?? weeks[weeks.length - 1];
   const visibleGames = useMemo(() => games.filter((g) => g.week === effectiveWeek), [games, effectiveWeek]);
   const bestBetsTally = useMemo(() => tallyBestBets(games), [games]);
+  const highTally = useMemo(() => tallyByConfidence(games, 'high'), [games]);
+  const mediumTally = useMemo(() => tallyByConfidence(games, 'medium'), [games]);
+  const monteCarloTally = useMemo(() => tallyMonteCarlo(games), [games]);
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <WeekSelector weeks={weeks} selectedWeek={effectiveWeek} onSelect={setSelectedWeek} />
-      <BestBetsRecordBanner tally={bestBetsTally} />
+      <SeasonSummaryBanner
+        bestBets={bestBetsTally}
+        high={highTally}
+        medium={mediumTally}
+        monteCarlo={monteCarloTally}
+      />
 
       {isLoading ? (
         <ActivityIndicator style={styles.centerFill} size="large" />
@@ -93,15 +145,42 @@ export default function PostGameAnalysisScreen() {
   );
 }
 
-function BestBetsRecordBanner({ tally }: { tally: BestBetTally }) {
-  const decided = tally.wins + tally.losses;
-  if (decided === 0 && tally.pushes === 0) return null;
-  const pct = decided > 0 ? ((tally.wins / decided) * 100).toFixed(1) : null;
+function SeasonSummaryBanner({
+  bestBets,
+  high,
+  medium,
+  monteCarlo,
+}: {
+  bestBets: BestBetTally;
+  high: BestBetTally;
+  medium: BestBetTally;
+  monteCarlo: BestBetTally;
+}) {
+  const chips = [
+    { label: 'Best Bets', tally: bestBets },
+    { label: 'High picks', tally: high },
+    { label: 'Medium picks', tally: medium },
+    { label: 'Monte Carlo', tally: monteCarlo },
+  ].filter((c) => c.tally.wins + c.tally.losses + c.tally.pushes > 0);
+
+  if (chips.length === 0) return null;
 
   return (
-    <View style={styles.bestBetsBanner}>
-      <Text style={styles.bestBetsBannerLabel}>Best Bets record (season)</Text>
-      <Text style={styles.bestBetsBannerValue}>
+    <View style={styles.seasonBanner}>
+      {chips.map((c) => (
+        <SeasonStatChip key={c.label} label={c.label} tally={c.tally} />
+      ))}
+    </View>
+  );
+}
+
+function SeasonStatChip({ label, tally }: { label: string; tally: BestBetTally }) {
+  const decided = tally.wins + tally.losses;
+  const pct = decided > 0 ? ((tally.wins / decided) * 100).toFixed(1) : null;
+  return (
+    <View style={styles.seasonChip}>
+      <Text style={styles.seasonChipLabel}>{label}</Text>
+      <Text style={styles.seasonChipValue}>
         {tally.wins}-{tally.losses}
         {tally.pushes > 0 ? `-${tally.pushes}` : ''}
         {pct != null ? ` (${pct}%)` : ''}
@@ -349,23 +428,29 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f6f8fa',
   },
-  bestBetsBanner: {
+  seasonBanner: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexWrap: 'wrap',
+    rowGap: 4,
+    columnGap: 18,
     backgroundColor: '#fff8ec',
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#d0d7de',
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
-  bestBetsBannerLabel: {
-    fontSize: 12,
+  seasonChip: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 5,
+  },
+  seasonChipLabel: {
+    fontSize: 11,
     fontWeight: '600',
     color: '#57606a',
   },
-  bestBetsBannerValue: {
-    fontSize: 13,
+  seasonChipValue: {
+    fontSize: 12,
     fontWeight: '800',
     color: '#9a6700',
   },
