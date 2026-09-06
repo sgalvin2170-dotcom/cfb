@@ -53,25 +53,38 @@ export interface SagarinData {
   teams: SagarinTeamRating[];
 }
 
-// Two header shapes seen on the live page: mid-season ("College Football
-// 2026 ratings through games of <date>") and preseason, before any games
-// have been played ("2026 College Football STARTING ratings" — no games-of
-// date to extract, so `asOf` falls back to today's date like FEI does for
-// the same reason). Matches whichever the page currently shows.
+// Three header shapes seen on the live page, all handled by one regex
+// rather than a growing list of exact alternatives — Sagarin has changed
+// the exact wording each time without warning, so this only fixes the
+// year/"ratings"/word-order variants actually observed, not a specific
+// string: "College Football 2026 ratings through games of <date>"
+// (mid-season, year after "College Football"), "2026 College Football
+// STARTING ratings" (preseason, no games-of date — `asOf` falls back to
+// today's date like FEI does for the same reason), and "2026 College
+// Football through games of <date>" (seen once games start counting,
+// 2026-09-05 — same as mid-season but "ratings" dropped and year moved
+// to the front, matching the preseason variant's word order instead).
 const HEADER_RE =
-  /(?:(?:FINAL\s+)?College Football (?<seasonMid>\d{4}) ratings through games of (?<asOfMid>[^\n<]+))|(?:(?<seasonStart>\d{4})\s+College Football STARTING ratings)/i;
+  /(?:FINAL\s+)?(?:College Football\s+(?<seasonA>\d{4})|(?<seasonB>\d{4})\s+College Football)\s*(?:ratings\s+)?(?:through games of\s+(?<asOf>[^\n<]+)|STARTING ratings)/i;
 const HFA_RE =
   /HOME ADVANTAGE=\[\s*([\d.]+)\]\s*\[\s*([\d.]+)\]\s*\[\s*([\d.]+)\]\s*\[\s*([\d.]+)\]\s*\[\s*([\d.]+)\]/;
 const ROW_RE =
   /^\s*\d+\s+(.+?)\s+[AB]\s+=\s*(-?\d+\.\d+)\s+\d+\s+\d+\s+-?\d+\.\d+\(\s*\d+\)\s+\d+\s+\d+\s+\|\s+\d+\s+\d+\s+\|\s+(-?\d+\.\d+)\s+\d+\s+\|\s+(-?\d+\.\d+)\s+\d+\s+\|\s+(-?\d+\.\d+)\s+\d+\s+\|\s+(-?\d+\.\d+)\s+\d+\s+(.+?)\s+\([AB]\)/gm;
-// Pulls the leading "YYYY Month D" out of asOf text like
-// "2026 January 19 Monday - CFP National Championship Game".
-const ASOF_DATE_RE = /^(\d{4})\s+([A-Za-z]+)\s+(\d{1,2})/;
+// Pulls "Month D" out of asOf text like "January 19 Monday - CFP National
+// Championship Game" or "August 29 Saturday" — a leading "YYYY " is
+// tolerated but not required, since HEADER_RE now consumes the year itself
+// on some page layouts (the "<year> College Football through games of
+// <date>" shape has no year left in the date text by the time it gets
+// here), and falling back to "now" whenever it's missing silently produced
+// a wrong asOfDate rather than an error, so the year always comes from the
+// header match's own season instead of being re-parsed out of this string.
+const ASOF_DATE_RE = /^(?:(\d{4})\s+)?([A-Za-z]+)\s+(\d{1,2})/;
 
-function parseAsOfDate(asOf: string): string {
+function parseAsOfDate(asOf: string, seasonYear: number): string {
   const m = asOf.match(ASOF_DATE_RE);
   if (!m) return new Date().toISOString();
-  const [, year, monthName, day] = m;
+  const [, yearFromText, monthName, day] = m;
+  const year = yearFromText ?? String(seasonYear);
   const parsed = new Date(`${monthName} ${day}, ${year} UTC`);
   return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
 }
@@ -105,12 +118,12 @@ export function parseSagarinHtml(html: string): SagarinData {
   }
 
   const groups = headerMatch.groups ?? {};
-  const season = groups.seasonMid ?? groups.seasonStart;
-  const asOf = groups.asOfMid?.trim() ?? 'preseason starting ratings (no games played yet)';
+  const season = Number(groups.seasonA ?? groups.seasonB);
+  const asOf = groups.asOf?.trim() ?? 'preseason starting ratings (no games played yet)';
   return {
-    season: Number(season),
+    season,
     asOf,
-    asOfDate: parseAsOfDate(asOf),
+    asOfDate: parseAsOfDate(asOf, season),
     homeAdvantage: {
       rating: Number(hfaMatch[1]),
       predictor: Number(hfaMatch[2]),

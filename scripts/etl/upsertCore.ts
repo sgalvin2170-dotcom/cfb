@@ -230,6 +230,27 @@ export async function recordRun(source: string, fn: () => Promise<number>): Prom
   }
 }
 
+// recordRun deliberately re-throws after logging, since it has no way to
+// know whether a given failure is safe to shrug off — that's a judgment
+// call for the caller. When a step runs several independent sources back to
+// back (e.g. ratings: FPI/Sagarin/FEI/TeamRankings), an uncaught throw from
+// one stops every source after it in that same sequence too, not just the
+// one that broke — discovered 2026-09-05 when a Sagarin page-format change
+// silently blocked FEI, TeamRankings, weather, recruiting, coaches, polls,
+// and the ensemble/freeze/CSV-export step for 5 straight days, since
+// nothing downstream of Sagarin in index.ts's main() ever got a chance to
+// run. This wraps recordRun so one source's failure can't take down
+// independent sources or steps that don't depend on it — matching the
+// project's "a blocked scraper degrades the model, it never breaks the
+// run" principle all the way through, not just inside a single source.
+export async function recordRunTolerant(source: string, fn: () => Promise<number>): Promise<number | undefined> {
+  try {
+    return await recordRun(source, fn);
+  } catch {
+    return undefined;
+  }
+}
+
 export async function runCfbdVerticalSlice(week?: number) {
   const teams = await fetchFbsTeams();
   const knownTeamIds = new Set(teams.map((t) => t.id));

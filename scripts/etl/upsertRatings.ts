@@ -7,7 +7,7 @@
 import { lookup } from '@instantdb/admin';
 
 import { db, transactInChunks } from './instantAdmin';
-import { recordRun } from './upsertCore';
+import { recordRunTolerant } from './upsertCore';
 import { findBestMatch, normalize } from './teamMatch';
 import { env } from './env';
 import { fetchEspnFpi } from './sources/espnFpi';
@@ -141,8 +141,8 @@ async function upsertTeamRankings(bySchool: Map<string, KnownTeam>) {
 export async function runRatingsIngestion() {
   const { bySchool, espnIds } = await fetchKnownTeams();
 
-  await recordRun('espn:fpi', () => upsertEspnFpi(espnIds));
-  await recordRun('sagarin:ratings', () => upsertSagarin(bySchool));
-  await recordRun('fei:ratings', () => upsertFei(bySchool));
-  await recordRun('team_rankings:ratings', () => upsertTeamRankings(bySchool));
+  await recordRunTolerant('espn:fpi', () => upsertEspnFpi(espnIds));
+  await recordRunTolerant('sagarin:ratings', () => upsertSagarin(bySchool));
+  await recordRunTolerant('fei:ratings', () => upsertFei(bySchool));
+  await recordRunTolerant('team_rankings:ratings', () => upsertTeamRankings(bySchool));
 }

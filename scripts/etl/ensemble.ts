@@ -167,30 +167,57 @@ export async function runEnsemble(week?: number) {
   // latestMetrics() below already keys its own dedup off `scrapedAt` for the
   // same reason.
   const ratingsCutoff = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+  const nowDate = new Date();
 
-  const { games } = await db.query({
-    games: {
-      $: { where: week != null ? { season: env.season, week } : { season: env.season } },
-      homeTeam: { ratings: { $: { where: { scrapedAt: { $gte: ratingsCutoff } } } } },
-      awayTeam: { ratings: { $: { where: { scrapedAt: { $gte: ratingsCutoff } } } } },
-      odds: {},
-      weatherForecasts: {},
-      // Frozen (already-started) games don't get recomputed below, but their
-      // existing pick still needs to feed into this week's Best Bets ranking
-      // — otherwise a Thursday-night game would silently vanish from the
-      // ranking pool once Saturday's slate re-runs.
-      ensemblePicks: { $: { where: { modelVersion } } },
-    },
-  });
+  // Split by kickoff rather than one query for the whole season: a
+  // not-yet-started game needs the full ratings/odds/weather joins to
+  // compute a fresh pick, but an already-started one only ever reads
+  // `ensemblePicks` (for Best Bets ranking — see the comment below), so
+  // joining ratings for it is pure waste. That waste used to be small
+  // early in the season but grows every week as more games finish — by
+  // 2026-09-06, with 47 of 761 season games started, the single unscoped
+  // query started intermittently timing out ("The query took too long to
+  // complete"), the same failure mode and root cause (ratings_raw's
+  // unbounded-feeling fan-out — see below) as the 2026-08-21 incident this
+  // file already documents a fix for. This is that fix's natural extension:
+  // stop paying for joins a game's own branch below never reads.
+  const baseWhere = week != null ? { season: env.season, week } : { season: env.season };
+  const [{ games: upcomingGames }, { games: startedGames }] = await Promise.all([
+    db.query({
+      games: {
+        $: { where: { ...baseWhere, startDate: { $gt: nowDate } } },
+        homeTeam: { ratings: { $: { where: { scrapedAt: { $gte: ratingsCutoff } } } } },
+        awayTeam: { ratings: { $: { where: { scrapedAt: { $gte: ratingsCutoff } } } } },
+        odds: {},
+        weatherForecasts: {},
+        ensemblePicks: { $: { where: { modelVersion } } },
+      },
+    }),
+    db.query({
+      games: {
+        $: { where: { ...baseWhere, startDate: { $lte: nowDate } } },
+        // Frozen (already-started) games don't get recomputed below, but
+        // their existing pick still needs to feed into this week's Best
+        // Bets ranking — otherwise a Thursday-night game would silently
+        // vanish from the ranking pool once Saturday's slate re-runs.
+        ensemblePicks: { $: { where: { modelVersion } } },
+      },
+    }),
+  ]);
+  const games = [...((upcomingGames ?? []) as any[]), ...((startedGames ?? []) as any[])];
 
+  // Only matters for not-yet-started games anyway (only they get matched
+  // against ThePredictionTracker below), which is the only bucket that
+  // actually queried homeTeam/awayTeam — startedGames didn't, so its rows
+  // carry a homeTeam/awayTeam stub (truthy, but with no `.school`) rather
+  // than nothing, and `.school`-gating (not just truthiness) skips those.
   const teamsInPlay = new Map<string, { id: string }>();
   for (const g of games as any[]) {
-    if (g.homeTeam) teamsInPlay.set(normalize(g.homeTeam.school), { id: g.homeTeam.id });
-    if (g.awayTeam) teamsInPlay.set(normalize(g.awayTeam.school), { id: g.awayTeam.id });
+    if (g.homeTeam?.school) teamsInPlay.set(normalize(g.homeTeam.school), { id: g.homeTeam.id });
+    if (g.awayTeam?.school) teamsInPlay.set(normalize(g.awayTeam.school), { id: g.awayTeam.id });
   }
   const predTrackerByPair = await fetchPredictionTrackerByGamePair(teamsInPlay);
 
-  const nowDate = new Date();
   const now = nowDate.toISOString();
   let computed = 0;
   let skippedNoSources = 0;

@@ -11,7 +11,7 @@
 // correct recruiting row. Exact match correctly matches every real FBS name
 // and correctly skips the non-FBS ones instead of guessing.
 import { db, transactInChunks } from './instantAdmin';
-import { recordRun } from './upsertCore';
+import { recordRunTolerant } from './upsertCore';
 import { findBestMatch, normalize } from './teamMatch';
 import { env } from './env';
 import {
@@ -249,8 +249,8 @@ async function upsertCbsReturning(bySchool: Map<string, KnownTeam>) {
 export async function runRecruitingPortalIngestion() {
   const bySchool = await fetchKnownTeams();
 
-  await recordRun('cfbd:recruiting', () => upsertRecruitingClasses(bySchool));
-  await recordRun('cfbd:portal', () => upsertPortalTransfers(bySchool));
-  await recordRun('cfbd:roster-continuity', () => upsertRosterContinuity(bySchool));
-  await recordRun('cbs:returning-starters', () => upsertCbsReturning(bySchool));
+  await recordRunTolerant('cfbd:recruiting', () => upsertRecruitingClasses(bySchool));
+  await recordRunTolerant('cfbd:portal', () => upsertPortalTransfers(bySchool));
+  await recordRunTolerant('cfbd:roster-continuity', () => upsertRosterContinuity(bySchool));
+  await recordRunTolerant('cbs:returning-starters', () => upsertCbsReturning(bySchool));
 }
