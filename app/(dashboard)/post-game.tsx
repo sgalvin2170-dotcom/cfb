@@ -5,8 +5,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import WeekSelector from '../../components/WeekSelector';
 import { db } from '../../lib/db';
 import { formatKickoff, formatSpread, formatTotal } from '../../lib/format';
-import { gradeAts, gradeTotal, gradeColor, type Grade } from '../../lib/grading';
+import { gradeAts, gradeTotal, gradeMoneyline, gradeColor, type Grade } from '../../lib/grading';
 import { aggregateBoxScore, type BoxScoreAgg } from '../../lib/boxScoreAgg';
+import { mlStrength } from '../../lib/bestBets';
 
 const CURRENT_SEASON = Number(process.env.EXPO_PUBLIC_CFB_SEASON ?? new Date().getFullYear());
 
@@ -46,10 +47,23 @@ function tallyBestBets(games: any[]): BestBetTally {
   return { wins, losses, pushes };
 }
 
+// High/Medium tier a pick's ML edge falls into — mirrors lib/bestBets.ts's
+// mlStrength/ML_HIGH_EDGE convention. mlPick is only ever set once |mlEdge|
+// clears ensemble.ts's own (lower) ML_EDGE_THRESHOLD, so there's no "low"
+// ML tier to account for here — every ML pick that exists is either
+// high or medium.
+function mlConfidenceLevel(mlEdge: number | null | undefined): 'high' | 'medium' | undefined {
+  if (mlEdge == null) return undefined;
+  return mlStrength(mlEdge) >= 1 ? 'high' : 'medium';
+}
+
+type Market = 'ats' | 'total' | 'ml';
+
 // Same idea as tallyBestBets, but gated on confidence tier instead of Best
-// Bets rank — every ATS/Total selection at that tier, not just the ones
-// that also cracked that week's top 10.
-function tallyByConfidence(games: any[], level: 'high' | 'medium'): BestBetTally {
+// Bets rank, and scoped to one market at a time — every selection at that
+// tier in that market, not just the ones that also cracked that week's
+// top 10.
+function tallyMarket(games: any[], market: Market, level: 'high' | 'medium'): BestBetTally {
   let wins = 0;
   let losses = 0;
   let pushes = 0;
@@ -58,18 +72,18 @@ function tallyByConfidence(games: any[], level: 'high' | 'medium'): BestBetTally
     if (!pick) continue;
     const odds = g.odds?.[0];
 
-    if (pick.atsConfidence === level) {
-      const grade = gradeAts(pick.atsPick, g.homePoints, g.awayPoints, odds?.homeSpread);
-      if (grade === 'win') wins++;
-      else if (grade === 'loss') losses++;
-      else if (grade === 'push') pushes++;
+    let grade: Grade | undefined;
+    if (market === 'ats' && pick.atsConfidence === level) {
+      grade = gradeAts(pick.atsPick, g.homePoints, g.awayPoints, odds?.homeSpread);
+    } else if (market === 'total' && pick.totalConfidence === level) {
+      grade = gradeTotal(pick.totalPick, g.homePoints, g.awayPoints, odds?.overUnder);
+    } else if (market === 'ml' && mlConfidenceLevel(pick.mlEdge) === level) {
+      grade = gradeMoneyline(pick.mlPick, g.homePoints, g.awayPoints);
     }
-    if (pick.totalConfidence === level) {
-      const grade = gradeTotal(pick.totalPick, g.homePoints, g.awayPoints, odds?.overUnder);
-      if (grade === 'win') wins++;
-      else if (grade === 'loss') losses++;
-      else if (grade === 'push') pushes++;
-    }
+
+    if (grade === 'win') wins++;
+    else if (grade === 'loss') losses++;
+    else if (grade === 'push') pushes++;
   }
   return { wins, losses, pushes };
 }
@@ -110,8 +124,12 @@ export default function PostGameAnalysisScreen() {
   const effectiveWeek = selectedWeek ?? weeks[weeks.length - 1];
   const visibleGames = useMemo(() => games.filter((g) => g.week === effectiveWeek), [games, effectiveWeek]);
   const bestBetsTally = useMemo(() => tallyBestBets(games), [games]);
-  const highTally = useMemo(() => tallyByConfidence(games, 'high'), [games]);
-  const mediumTally = useMemo(() => tallyByConfidence(games, 'medium'), [games]);
+  const highAtsTally = useMemo(() => tallyMarket(games, 'ats', 'high'), [games]);
+  const highTotalTally = useMemo(() => tallyMarket(games, 'total', 'high'), [games]);
+  const highMlTally = useMemo(() => tallyMarket(games, 'ml', 'high'), [games]);
+  const mediumAtsTally = useMemo(() => tallyMarket(games, 'ats', 'medium'), [games]);
+  const mediumTotalTally = useMemo(() => tallyMarket(games, 'total', 'medium'), [games]);
+  const mediumMlTally = useMemo(() => tallyMarket(games, 'ml', 'medium'), [games]);
   const monteCarloTally = useMemo(() => tallyMonteCarlo(games), [games]);
 
   return (
@@ -119,8 +137,12 @@ export default function PostGameAnalysisScreen() {
       <WeekSelector weeks={weeks} selectedWeek={effectiveWeek} onSelect={setSelectedWeek} />
       <SeasonSummaryBanner
         bestBets={bestBetsTally}
-        high={highTally}
-        medium={mediumTally}
+        highAts={highAtsTally}
+        highTotal={highTotalTally}
+        highMl={highMlTally}
+        mediumAts={mediumAtsTally}
+        mediumTotal={mediumTotalTally}
+        mediumMl={mediumMlTally}
         monteCarlo={monteCarloTally}
       />
 
@@ -147,19 +169,31 @@ export default function PostGameAnalysisScreen() {
 
 function SeasonSummaryBanner({
   bestBets,
-  high,
-  medium,
+  highAts,
+  highTotal,
+  highMl,
+  mediumAts,
+  mediumTotal,
+  mediumMl,
   monteCarlo,
 }: {
   bestBets: BestBetTally;
-  high: BestBetTally;
-  medium: BestBetTally;
+  highAts: BestBetTally;
+  highTotal: BestBetTally;
+  highMl: BestBetTally;
+  mediumAts: BestBetTally;
+  mediumTotal: BestBetTally;
+  mediumMl: BestBetTally;
   monteCarlo: BestBetTally;
 }) {
   const chips = [
     { label: 'Best Bets', tally: bestBets },
-    { label: 'High picks', tally: high },
-    { label: 'Medium picks', tally: medium },
+    { label: 'High ATS', tally: highAts },
+    { label: 'High O/U', tally: highTotal },
+    { label: 'High ML', tally: highMl },
+    { label: 'Medium ATS', tally: mediumAts },
+    { label: 'Medium O/U', tally: mediumTotal },
+    { label: 'Medium ML', tally: mediumMl },
     { label: 'Monte Carlo', tally: monteCarlo },
   ].filter((c) => c.tally.wins + c.tally.losses + c.tally.pushes > 0);
 
@@ -205,7 +239,9 @@ function PostGameCard({ game }: { game: any }) {
 
   const showAts = pick?.atsConfidence === 'high' || pick?.atsConfidence === 'medium';
   const showTotal = pick?.totalConfidence === 'high' || pick?.totalConfidence === 'medium';
-  if (!showAts && !showTotal) return null;
+  const mlLevel = mlConfidenceLevel(pick?.mlEdge);
+  const showMl = pick?.mlPick != null && mlLevel != null;
+  if (!showAts && !showTotal && !showMl) return null;
 
   const hasScore = game.homePoints != null && game.awayPoints != null;
   const actualSpread = hasScore ? game.awayPoints - game.homePoints : undefined;
@@ -218,6 +254,7 @@ function PostGameCard({ game }: { game: any }) {
 
   const atsGrade = showAts ? gradeAts(pick.atsPick, game.homePoints, game.awayPoints, odds?.homeSpread) : undefined;
   const totalGrade = showTotal ? gradeTotal(pick.totalPick, game.homePoints, game.awayPoints, odds?.overUnder) : undefined;
+  const mlGrade = showMl ? gradeMoneyline(pick.mlPick, game.homePoints, game.awayPoints) : undefined;
 
   return (
     <View style={styles.card}>
@@ -251,6 +288,8 @@ function PostGameCard({ game }: { game: any }) {
           bestBetRank={pick.totalBestBetRank}
         />
       ) : null}
+
+      {showMl ? <MoneylineRow game={game} pick={pick} level={mlLevel!} grade={mlGrade} /> : null}
 
       <MonteCarloRow game={game} pick={pick} />
 
@@ -304,6 +343,38 @@ function SelectionRow({
         <NumberCell label="Actual" value={actual} />
       </View>
       {bestBetRank != null ? <Text style={styles.bestBetBadge}>★ Best Bet #{bestBetRank} that week</Text> : null}
+    </View>
+  );
+}
+
+// Straight-up moneyline pick, same "only show high/medium" gate as
+// ATS/Total above — pick.mlEdge is a win-probability edge (e.g. 0.12 =
+// 12pt), not points or a spread, so it gets its own display line rather
+// than reusing SelectionRow's Model/Market/Actual number cells.
+function MoneylineRow({
+  game,
+  pick,
+  level,
+  grade,
+}: {
+  game: any;
+  pick: any;
+  level: 'high' | 'medium';
+  grade: Grade | undefined;
+}) {
+  const team = pick.mlPick === 'home' ? game.homeTeam?.school : game.awayTeam?.school;
+  const edgePct = Math.abs(pick.mlEdge) * 100;
+  const highlight = level === 'high' ? styles.highlightHigh : styles.highlightMedium;
+  return (
+    <View style={[styles.selectionBlock, highlight]}>
+      <View style={styles.selectionHeader}>
+        <Text style={styles.selectionLabel}>
+          ML ({level}) — {team ?? pick.mlPick?.toUpperCase()}
+        </Text>
+        <Text style={[styles.gradeText, { color: gradeColor(grade) }]}>{grade ? grade.toUpperCase() : '—'}</Text>
+      </View>
+      <Text style={styles.mcExpected}>{edgePct.toFixed(1)}% win-prob edge</Text>
+      {pick.mlBestBetRank != null ? <Text style={styles.bestBetBadge}>★ Best Bet #{pick.mlBestBetRank} that week</Text> : null}
     </View>
   );
 }

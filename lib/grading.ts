@@ -34,6 +34,21 @@ export function gradeTotal(
   return picked ? 'win' : 'loss';
 }
 
+// Straight-up, not against a spread — CFB games don't end in ties, so
+// there's no real push case, but a shutdown-to-the-second tie is handled
+// the same defensive way gradeAts/gradeTotal handle theirs anyway.
+export function gradeMoneyline(
+  mlPick: string | undefined | null,
+  homePoints: number | undefined | null,
+  awayPoints: number | undefined | null,
+): Grade | undefined {
+  if (!mlPick || homePoints == null || awayPoints == null) return undefined;
+  if (homePoints === awayPoints) return 'push';
+  const homeWon = homePoints > awayPoints;
+  const picked = mlPick === 'home' ? homeWon : !homeWon;
+  return picked ? 'win' : 'loss';
+}
+
 export function gradeColor(grade: Grade | undefined): string {
   switch (grade) {
     case 'win':

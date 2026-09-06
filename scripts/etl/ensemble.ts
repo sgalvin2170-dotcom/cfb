@@ -402,7 +402,23 @@ export async function runEnsemble(week?: number) {
   // per-week top-10 scope) — computed over every game's pick in that week,
   // frozen or not, but only written onto the games actually being written
   // below (a frozen game's own rank stays whatever was last computed the
-  // run before its kickoff).
+  // run before its kickoff) — UNLESS the whole week has since finished, in
+  // which case every game's rank is finalized (recomputed and overwritten)
+  // against the week's now fully-settled picks instead. Without this, a
+  // week disrupted mid-week by anything (an outage, a source coming back
+  // online, a late odds correction) permanently freezes some games' ranks
+  // against a smaller/staler candidate pool than others in the same week
+  // ever saw, so the stored rank can quietly stop matching what the Best
+  // Bets screen itself would show for that same game. Found 2026-09-07:
+  // UTEP@Oklahoma froze rank #6 on 2026-08-31 (the last run before that
+  // 5-day outage), while Liberty@James Madison — same week, played a day
+  // later — got a fresh recompute once the outage was fixed on 09-05,
+  // edging UTEP down to #7 everywhere except its own stale stored value.
+  // This never touches an in-progress week's still-forming rank, since
+  // that WOULD compare an already-played game against one that hasn't
+  // happened yet — only a week where every game has already started is
+  // eligible, and recomputing it is idempotent (same settled inputs give
+  // the same answer), so it's safe to redo on every run indefinitely.
   const rowsByWeek = new Map<number, Row[]>();
   for (const row of rows) {
     const list = rowsByWeek.get(row.week) ?? [];
@@ -415,8 +431,11 @@ export async function runEnsemble(week?: number) {
       rankByKey.set(key, rank);
     }
   }
+  const finalizedWeeks = new Set(
+    [...rowsByWeek.entries()].filter(([, weekRows]) => weekRows.every((r) => r.pending == null)).map(([w]) => w),
+  );
 
-  const txs = rows
+  const pendingTxs = rows
     .filter((r): r is Row & { pending: NonNullable<Row['pending']> } => r.pending != null)
     .map(({ game, pending }) => {
       const mc =
@@ -452,9 +471,26 @@ export async function runEnsemble(week?: number) {
         .link({ game: lookup('cfbdGameId', game.cfbdGameId) });
     });
 
+  // Finalize pass: every already-frozen game in a week where nothing is
+  // still pending gets its rank recomputed against that week's settled
+  // pool — a lightweight update, touching only the rank fields, not
+  // anything about the pick itself (which stays exactly as it froze).
+  const finalizedTxs = rows
+    .filter((r) => r.pending == null && finalizedWeeks.has(r.week))
+    .map(({ game }) =>
+      db.tx.ensemble_picks.lookup('pickKey', `${modelVersion}:${game.cfbdGameId}`).update({
+        atsBestBetRank: rankByKey.get(`${game.id}:ATS`) ?? null,
+        totalBestBetRank: rankByKey.get(`${game.id}:Total`) ?? null,
+        mlBestBetRank: rankByKey.get(`${game.id}:ML`) ?? null,
+      }),
+    );
+
+  const txs = [...pendingTxs, ...finalizedTxs];
   await transactInChunks(txs);
   console.log(
-    `[ensemble] (${modelVersion}) computed ${computed} pick(s), left ${frozen} already-started game(s) frozen, skipped ${skippedNoSources} game(s) with no available rating source`,
+    `[ensemble] (${modelVersion}) computed ${computed} pick(s), left ${frozen} already-started game(s) frozen, ` +
+      `finalized Best Bets ranks for ${finalizedTxs.length} game(s) across ${finalizedWeeks.size} fully-settled week(s), ` +
+      `skipped ${skippedNoSources} game(s) with no available rating source`,
   );
   return computed;
 }
