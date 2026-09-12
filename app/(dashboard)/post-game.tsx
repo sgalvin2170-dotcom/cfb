@@ -19,9 +19,13 @@ interface BestBetTally {
 
 // Season-to-date, not scoped to the visible week — a Best Bets win/loss
 // record only means something as a running total. Grades the same
-// ATS/Total selections SelectionRow already grades below, just gated on
-// whether that specific selection carried a frozen Best Bets rank for its
-// week (see scripts/etl/ensemble.ts) rather than every high/medium pick.
+// ATS/Total/ML selections SelectionRow/MoneylineRow already grade below,
+// just gated on whether that specific selection carried a frozen Best Bets
+// rank for its week (see scripts/etl/ensemble.ts) rather than every
+// high/medium pick. mlBestBetRank must be checked here too, alongside
+// ATS/Total — missing it undercounted the record (5-3 shown vs. the
+// correct 7-3 for a 10-pick week) since a rank-1 and rank-3 ML pick were
+// silently never tallied.
 function tallyBestBets(games: any[]): BestBetTally {
   let wins = 0;
   let losses = 0;
@@ -39,6 +43,12 @@ function tallyBestBets(games: any[]): BestBetTally {
     }
     if (pick.totalBestBetRank != null) {
       const grade = gradeTotal(pick.totalPick, g.homePoints, g.awayPoints, odds?.overUnder);
+      if (grade === 'win') wins++;
+      else if (grade === 'loss') losses++;
+      else if (grade === 'push') pushes++;
+    }
+    if (pick.mlBestBetRank != null) {
+      const grade = gradeMoneyline(pick.mlPick, g.homePoints, g.awayPoints);
       if (grade === 'win') wins++;
       else if (grade === 'loss') losses++;
       else if (grade === 'push') pushes++;
@@ -104,6 +114,34 @@ function tallyMonteCarlo(games: any[]): BestBetTally {
   return { wins, losses, pushes: 0 };
 }
 
+interface Tallies {
+  bestBets: BestBetTally;
+  highAts: BestBetTally;
+  highTotal: BestBetTally;
+  highMl: BestBetTally;
+  mediumAts: BestBetTally;
+  mediumTotal: BestBetTally;
+  mediumMl: BestBetTally;
+  monteCarlo: BestBetTally;
+}
+
+// All 8 banner categories for one pool of games — called once for "this
+// week only" and once for "every completed week up through this one," so
+// the two rows in SeasonSummaryBanner always grade the exact same criteria,
+// just over different game pools.
+function computeTallies(games: any[]): Tallies {
+  return {
+    bestBets: tallyBestBets(games),
+    highAts: tallyMarket(games, 'ats', 'high'),
+    highTotal: tallyMarket(games, 'total', 'high'),
+    highMl: tallyMarket(games, 'ml', 'high'),
+    mediumAts: tallyMarket(games, 'ats', 'medium'),
+    mediumTotal: tallyMarket(games, 'total', 'medium'),
+    mediumMl: tallyMarket(games, 'ml', 'medium'),
+    monteCarlo: tallyMonteCarlo(games),
+  };
+}
+
 export default function PostGameAnalysisScreen() {
   const [selectedWeek, setSelectedWeek] = useState<number | undefined>(undefined);
 
@@ -123,27 +161,21 @@ export default function PostGameAnalysisScreen() {
   const weeks = useMemo(() => Array.from(new Set(games.map((g) => g.week))).sort((a, b) => a - b), [games]);
   const effectiveWeek = selectedWeek ?? weeks[weeks.length - 1];
   const visibleGames = useMemo(() => games.filter((g) => g.week === effectiveWeek), [games, effectiveWeek]);
-  const bestBetsTally = useMemo(() => tallyBestBets(games), [games]);
-  const highAtsTally = useMemo(() => tallyMarket(games, 'ats', 'high'), [games]);
-  const highTotalTally = useMemo(() => tallyMarket(games, 'total', 'high'), [games]);
-  const highMlTally = useMemo(() => tallyMarket(games, 'ml', 'high'), [games]);
-  const mediumAtsTally = useMemo(() => tallyMarket(games, 'ats', 'medium'), [games]);
-  const mediumTotalTally = useMemo(() => tallyMarket(games, 'total', 'medium'), [games]);
-  const mediumMlTally = useMemo(() => tallyMarket(games, 'ml', 'medium'), [games]);
-  const monteCarloTally = useMemo(() => tallyMonteCarlo(games), [games]);
+  // Cumulative is scoped to weeks up through the one being viewed, not every
+  // completed game regardless of tab — reviewing week 1 later in the season
+  // should show week 1's own running total, not bleed in week 2+ results.
+  const cumulativeGames = useMemo(() => games.filter((g) => g.week <= effectiveWeek), [games, effectiveWeek]);
+  const weekTallies = useMemo(() => computeTallies(visibleGames), [visibleGames]);
+  const cumulativeTallies = useMemo(() => computeTallies(cumulativeGames), [cumulativeGames]);
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <WeekSelector weeks={weeks} selectedWeek={effectiveWeek} onSelect={setSelectedWeek} />
       <SeasonSummaryBanner
-        bestBets={bestBetsTally}
-        highAts={highAtsTally}
-        highTotal={highTotalTally}
-        highMl={highMlTally}
-        mediumAts={mediumAtsTally}
-        mediumTotal={mediumTotalTally}
-        mediumMl={mediumMlTally}
-        monteCarlo={monteCarloTally}
+        weekLabel={`Week ${effectiveWeek ?? '—'}`}
+        week={weekTallies}
+        cumulativeLabel={`Cumulative thru Wk ${effectiveWeek ?? '—'}`}
+        cumulative={cumulativeTallies}
       />
 
       {isLoading ? (
@@ -168,39 +200,41 @@ export default function PostGameAnalysisScreen() {
 }
 
 function SeasonSummaryBanner({
-  bestBets,
-  highAts,
-  highTotal,
-  highMl,
-  mediumAts,
-  mediumTotal,
-  mediumMl,
-  monteCarlo,
+  weekLabel,
+  week,
+  cumulativeLabel,
+  cumulative,
 }: {
-  bestBets: BestBetTally;
-  highAts: BestBetTally;
-  highTotal: BestBetTally;
-  highMl: BestBetTally;
-  mediumAts: BestBetTally;
-  mediumTotal: BestBetTally;
-  mediumMl: BestBetTally;
-  monteCarlo: BestBetTally;
+  weekLabel: string;
+  week: Tallies;
+  cumulativeLabel: string;
+  cumulative: Tallies;
 }) {
+  return (
+    <View>
+      <SummaryRow rowLabel={weekLabel} tallies={week} />
+      <SummaryRow rowLabel={cumulativeLabel} tallies={cumulative} style={styles.seasonBannerCumulative} />
+    </View>
+  );
+}
+
+function SummaryRow({ rowLabel, tallies, style }: { rowLabel: string; tallies: Tallies; style?: object }) {
   const chips = [
-    { label: 'Best Bets', tally: bestBets },
-    { label: 'High ATS', tally: highAts },
-    { label: 'High O/U', tally: highTotal },
-    { label: 'High ML', tally: highMl },
-    { label: 'Medium ATS', tally: mediumAts },
-    { label: 'Medium O/U', tally: mediumTotal },
-    { label: 'Medium ML', tally: mediumMl },
-    { label: 'Monte Carlo', tally: monteCarlo },
+    { label: 'Best Bets', tally: tallies.bestBets },
+    { label: 'High ATS', tally: tallies.highAts },
+    { label: 'High O/U', tally: tallies.highTotal },
+    { label: 'High ML', tally: tallies.highMl },
+    { label: 'Medium ATS', tally: tallies.mediumAts },
+    { label: 'Medium O/U', tally: tallies.mediumTotal },
+    { label: 'Medium ML', tally: tallies.mediumMl },
+    { label: 'Monte Carlo', tally: tallies.monteCarlo },
   ].filter((c) => c.tally.wins + c.tally.losses + c.tally.pushes > 0);
 
   if (chips.length === 0) return null;
 
   return (
-    <View style={styles.seasonBanner}>
+    <View style={[styles.seasonBanner, style]}>
+      <Text style={styles.seasonRowLabel}>{rowLabel}</Text>
       {chips.map((c) => (
         <SeasonStatChip key={c.label} label={c.label} tally={c.tally} />
       ))}
@@ -502,6 +536,7 @@ const styles = StyleSheet.create({
   seasonBanner: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    alignItems: 'baseline',
     rowGap: 4,
     columnGap: 18,
     backgroundColor: '#fff8ec',
@@ -509,6 +544,16 @@ const styles = StyleSheet.create({
     borderBottomColor: '#d0d7de',
     paddingHorizontal: 14,
     paddingVertical: 8,
+  },
+  seasonBannerCumulative: {
+    backgroundColor: '#eef2f7',
+  },
+  seasonRowLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#0b1d3a',
+    textTransform: 'uppercase',
+    marginRight: 2,
   },
   seasonChip: {
     flexDirection: 'row',
