@@ -72,17 +72,19 @@ async function fetchPollUncached(year: number, seasonType: number, week: number)
   return rows;
 }
 
-// A poll is published once results exist to base it on, so ESPN's regular-
-// season "week N" poll is released *after* week N's games conclude — it's
-// the operative ranking entering CFBD's week N+1, not week N itself
-// (confirmed live: regular-season week 1 404s before week 1 has been
-// played). So CFBD week 1 always uses the preseason poll, and CFBD week N
-// (N>=2) tries the regular-season week (N-1) poll, falling back to
-// preseason if that hasn't published yet (e.g. every week before the
-// season actually starts).
+// ESPN's regular-season "week N" poll IS the operative ranking entering
+// CFBD's week N (same number, no offset) — it's released once week N-1's
+// games conclude, which is why it 404s until then, but ESPN never publishes
+// a "week 1" regular-season poll at all: the first post-results release is
+// labeled "week 2" directly. Confirmed live 2026-09-12 by comparing
+// types/2/weeks/2's headline ("AFCA Coaches Poll Week 2") and full ranking
+// list against espn.com's own week-2 rankings page — they matched exactly,
+// while the previously-used types/2/weeks/(N-1) endpoint (a genuine off-by-
+// one bug fixed this same day) 404s permanently and was silently falling
+// back to the 3-week-stale preseason poll for every week >= 2.
 export async function fetchCoachesPollForWeek(cfbdWeek: number, year: number = env.season): Promise<PollRow[]> {
   if (cfbdWeek > 1) {
-    const regular = await fetchPoll(year, 2, cfbdWeek - 1);
+    const regular = await fetchPoll(year, 2, cfbdWeek);
     if (regular && regular.length > 0) return regular;
   }
   const preseason = await fetchPoll(year, 1, 1);
