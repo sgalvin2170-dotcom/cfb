@@ -35,6 +35,17 @@ const MANUAL_ALIASES: Record<string, string> = {
   hawaii: 'hawai i', // CFBD spells it "Hawai'i"; FEI spells it "Hawaii"
   'appalachian state': 'app state', // CFBD abbreviates to "App State"
   fiu: 'florida international', // CBS Sports abbreviates to "FIU"
+  // TeamRankings truncates mid-word ("So" for "Southern", "Intl" for
+  // "International") rather than dropping whole words, so the general
+  // word-boundary-prefix heuristic below can't catch these: "georgia so"
+  // IS a word-boundary prefix match for "georgia" (wrong) but NOT for
+  // "georgia southern" (right), since "so" isn't a complete word. Found
+  // live 2026-09-13 as an InstantDB "Record not unique" transaction error
+  // — both the abbreviated and full-name rows appear on the same
+  // TeamRankings page and were colliding onto Georgia's/Florida's rating
+  // key instead of Georgia Southern's/Florida International's.
+  'georgia so': 'georgia southern',
+  'florida intl': 'florida international',
   // CBS spells it "Miami-Ohio" -> normalizes to "miami ohio", which is a
   // word-boundary prefix match for "Miami" (the Florida school) but NOT for
   // our "Miami (OH)" candidate (normalizes to "miami oh", and "miami ohio"
