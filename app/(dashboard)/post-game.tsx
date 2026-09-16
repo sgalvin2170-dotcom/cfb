@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import WeekSelector from '../../components/WeekSelector';
@@ -114,6 +114,29 @@ function tallyMonteCarlo(games: any[]): BestBetTally {
   return { wins, losses, pushes: 0 };
 }
 
+// Each team's cumulative season W-L, shown next to its name in the box
+// score — same "every completed game currently in the DB" scope as the
+// Season-to-date stat columns next to it (not scoped to weeks up through
+// the game being viewed), so the record and the stats it sits beside are
+// always describing the same pool of games.
+function computeTeamRecords(games: any[]): Map<string, { wins: number; losses: number }> {
+  const records = new Map<string, { wins: number; losses: number }>();
+  const bump = (teamId: string | undefined, win: boolean) => {
+    if (!teamId) return;
+    const r = records.get(teamId) ?? { wins: 0, losses: 0 };
+    if (win) r.wins++;
+    else r.losses++;
+    records.set(teamId, r);
+  };
+  for (const g of games) {
+    if (g.homePoints == null || g.awayPoints == null || g.homePoints === g.awayPoints) continue;
+    const homeWon = g.homePoints > g.awayPoints;
+    bump(g.homeTeam?.id, homeWon);
+    bump(g.awayTeam?.id, !homeWon);
+  }
+  return records;
+}
+
 interface Tallies {
   bestBets: BestBetTally;
   highAts: BestBetTally;
@@ -144,6 +167,7 @@ function computeTallies(games: any[]): Tallies {
 
 export default function PostGameAnalysisScreen() {
   const [selectedWeek, setSelectedWeek] = useState<number | undefined>(undefined);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const { isLoading, error, data } = db.useQuery({
     games: {
@@ -167,6 +191,20 @@ export default function PostGameAnalysisScreen() {
   const cumulativeGames = useMemo(() => games.filter((g) => g.week <= effectiveWeek), [games, effectiveWeek]);
   const weekTallies = useMemo(() => computeTallies(visibleGames), [visibleGames]);
   const cumulativeTallies = useMemo(() => computeTallies(cumulativeGames), [cumulativeGames]);
+  const teamRecords = useMemo(() => computeTeamRecords(games), [games]);
+
+  // A team search looks across every completed week, not just the selected
+  // tab — the point is finding a game without first knowing which week it
+  // was in, so an active search overrides the week filter rather than
+  // narrowing it further.
+  const trimmedQuery = searchQuery.trim().toLowerCase();
+  const searchResults = useMemo(() => {
+    if (!trimmedQuery) return null;
+    return games.filter(
+      (g) => g.homeTeam?.school?.toLowerCase().includes(trimmedQuery) || g.awayTeam?.school?.toLowerCase().includes(trimmedQuery),
+    );
+  }, [games, trimmedQuery]);
+  const displayedGames = searchResults ?? visibleGames;
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -177,6 +215,23 @@ export default function PostGameAnalysisScreen() {
         cumulativeLabel={`Cumulative thru Wk ${effectiveWeek ?? '—'}`}
         cumulative={cumulativeTallies}
       />
+      <View style={styles.searchBar}>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search by team..."
+          placeholderTextColor="#8b949e"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          autoCorrect={false}
+          autoCapitalize="none"
+          clearButtonMode="while-editing"
+        />
+        {searchResults != null ? (
+          <Text style={styles.searchHint}>
+            {searchResults.length} game{searchResults.length === 1 ? '' : 's'} across all weeks
+          </Text>
+        ) : null}
+      </View>
 
       {isLoading ? (
         <ActivityIndicator style={styles.centerFill} size="large" />
@@ -188,10 +243,14 @@ export default function PostGameAnalysisScreen() {
         <View style={styles.centerFill}>
           <Text style={styles.emptyText}>No completed games yet this season.</Text>
         </View>
+      ) : displayedGames.length === 0 ? (
+        <View style={styles.centerFill}>
+          <Text style={styles.emptyText}>No games found for "{searchQuery.trim()}".</Text>
+        </View>
       ) : (
         <ScrollView contentContainerStyle={styles.list}>
-          {visibleGames.map((game) => (
-            <PostGameCard key={game.id} game={game} />
+          {displayedGames.map((game) => (
+            <PostGameCard key={game.id} game={game} teamRecords={teamRecords} />
           ))}
         </ScrollView>
       )}
@@ -263,7 +322,7 @@ function SeasonStatChip({ label, tally }: { label: string; tally: BestBetTally }
 // in one directly-comparable convention — unlike Game Detail, which shows
 // the model margin in its native sign since it's not side-by-side with a
 // market number there in the same way.
-function PostGameCard({ game }: { game: any }) {
+function PostGameCard({ game, teamRecords }: { game: any; teamRecords: Map<string, { wins: number; losses: number }> }) {
   const pick = game.ensemblePicks?.[0];
   const odds = game.odds?.[0];
   const homeStats = (game.teamStats ?? []).find((s: any) => s.team?.id === game.homeTeam?.id);
@@ -330,6 +389,10 @@ function PostGameCard({ game }: { game: any }) {
       <BoxScoreTable
         awayLabel={game.awayTeam?.school ?? 'Away'}
         homeLabel={game.homeTeam?.school ?? 'Home'}
+        awayResult={hasScore ? (game.awayPoints > game.homePoints ? 'W' : game.awayPoints < game.homePoints ? 'L' : undefined) : undefined}
+        homeResult={hasScore ? (game.homePoints > game.awayPoints ? 'W' : game.homePoints < game.awayPoints ? 'L' : undefined) : undefined}
+        awayRecord={teamRecords.get(game.awayTeam?.id)}
+        homeRecord={teamRecords.get(game.homeTeam?.id)}
         awayStats={awayStats}
         homeStats={homeStats}
         awayYtd={awayYtd}
@@ -452,6 +515,10 @@ function NumberCell({ label, value }: { label: string; value: string }) {
 function BoxScoreTable({
   awayLabel,
   homeLabel,
+  awayResult,
+  homeResult,
+  awayRecord,
+  homeRecord,
   awayStats,
   homeStats,
   awayYtd,
@@ -459,6 +526,10 @@ function BoxScoreTable({
 }: {
   awayLabel: string;
   homeLabel: string;
+  awayResult: 'W' | 'L' | undefined;
+  homeResult: 'W' | 'L' | undefined;
+  awayRecord: { wins: number; losses: number } | undefined;
+  homeRecord: { wins: number; losses: number } | undefined;
   awayStats: any;
   homeStats: any;
   awayYtd: BoxScoreAgg;
@@ -471,6 +542,7 @@ function BoxScoreTable({
         <View style={styles.boxScore}>
           <View style={styles.boxScoreRow}>
             <Text style={styles.boxScoreRowLabel} />
+            <Text style={styles.boxScoreHeaderCell}>W-L</Text>
             <Text style={styles.boxScoreHeaderCell}>Rush</Text>
             <Text style={styles.boxScoreHeaderCell}>Pass</Text>
             <Text style={styles.boxScoreHeaderCell}>Rush Plays</Text>
@@ -486,20 +558,33 @@ function BoxScoreTable({
             <Text style={styles.boxScoreHeaderCell}>Pen</Text>
             <Text style={styles.boxScoreHeaderCell}>TO</Text>
           </View>
-          <BoxScoreRow label={awayLabel} stats={awayStats} ytd={awayYtd} />
-          <BoxScoreRow label={homeLabel} stats={homeStats} ytd={homeYtd} />
+          <BoxScoreRow label={awayLabel} result={awayResult} record={awayRecord} stats={awayStats} ytd={awayYtd} />
+          <BoxScoreRow label={homeLabel} result={homeResult} record={homeRecord} stats={homeStats} ytd={homeYtd} />
         </View>
       </ScrollView>
     </View>
   );
 }
 
-function BoxScoreRow({ label, stats, ytd }: { label: string; stats: any; ytd: BoxScoreAgg }) {
+function BoxScoreRow({
+  label,
+  result,
+  record,
+  stats,
+  ytd,
+}: {
+  label: string;
+  result: 'W' | 'L' | undefined;
+  record: { wins: number; losses: number } | undefined;
+  stats: any;
+  ytd: BoxScoreAgg;
+}) {
   return (
     <View style={styles.boxScoreRow}>
       <Text style={styles.boxScoreRowLabel} numberOfLines={1}>
         {label}
       </Text>
+      <StatCell value={result} ytd={record ? `${record.wins}-${record.losses}` : undefined} />
       <StatCell value={stats?.rushingYards} ytd={ytd.rushingYards} />
       <StatCell value={stats?.passingYards} ytd={ytd.passingYards} />
       <StatCell value={stats?.rushingAttempts} ytd={ytd.rushingAttempts} />
@@ -569,6 +654,32 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     color: '#9a6700',
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#fff',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#d0d7de',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 13,
+    color: '#0b1d3a',
+    backgroundColor: '#f6f8fa',
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#d0d7de',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  searchHint: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#57606a',
   },
   centerFill: {
     flex: 1,
