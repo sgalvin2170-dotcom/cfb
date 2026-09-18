@@ -12,6 +12,7 @@ import { runCoachesIngestion } from './upsertCoaches';
 import { runPollsIngestion } from './upsertPolls';
 import { runEnsembleWithLogging } from './ensemble';
 import { exportTodayCsv } from './csv';
+import { buildDashboard } from '../buildDashboard';
 
 // Each of these steps is independent of the others, so one step's total
 // failure shouldn't cost the rest of the day's data — and especially
@@ -54,6 +55,13 @@ async function main() {
   console.log('Ensemble picks computed:', picksComputed);
 
   await exportTodayCsv();
+
+  // Always regenerates the full-season snapshot regardless of the `week`
+  // arg above — the static dashboard has no week scoping of its own, so a
+  // partial/manual run still refreshes every section correctly. Tolerant
+  // like the steps above: a dashboard-rendering bug shouldn't cost the
+  // picks/CSV work that already succeeded this run.
+  await step('dashboard', buildDashboard);
 }
 
 main().catch((err) => {

@@ -33,6 +33,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "etl": "tsx scripts/etl/index.ts",
+    "dashboard": "tsx scripts/buildDashboard.ts",
     "typecheck": "tsc --noEmit"
   },
   "private": true,
